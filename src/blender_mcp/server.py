@@ -89,9 +89,9 @@ def blender_get_object(name: str) -> dict[str, Any]:
 def blender_create_primitive(
     primitive_type: str,
     name: str,
-    location: list[float] = [0.0, 0.0, 0.0],
-    rotation: list[float] = [0.0, 0.0, 0.0],
-    scale: list[float] = [1.0, 1.0, 1.0],
+    location: list[float] | None = None,
+    rotation: list[float] | None = None,
+    scale: list[float] | None = None,
 ) -> dict[str, Any]:
     """Create an allowlisted mesh primitive when mutations are enabled.
 
@@ -101,9 +101,9 @@ def blender_create_primitive(
     return controller.create_primitive(
         primitive_type,
         name,
-        location,
-        rotation,
-        scale,
+        location if location is not None else [0.0, 0.0, 0.0],
+        rotation if rotation is not None else [0.0, 0.0, 0.0],
+        scale if scale is not None else [1.0, 1.0, 1.0],
     )
 
 
@@ -122,8 +122,13 @@ def blender_set_transform(
 
 
 def main() -> None:
+    port = int(os.getenv("BLENDER_MCP_PORT", "8001"))
+    if not 1024 <= port <= 65535:
+        raise ValueError("BLENDER_MCP_PORT must be between 1024 and 65535.")
     mcp.run(
         transport="streamable-http",
+        host="127.0.0.1",
+        port=port,
         json_response=True,
         transport_security=transport_security,
     )
