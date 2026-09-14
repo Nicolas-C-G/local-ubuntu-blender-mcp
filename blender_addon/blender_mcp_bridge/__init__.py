@@ -8,6 +8,7 @@ import math
 import os
 import queue
 import threading
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -25,9 +26,19 @@ bl_info = {
 }
 
 _MAX_BODY_BYTES = 65_536
-_jobs: queue.Queue[tuple[dict[str, Any], threading.Event, dict[str, Any]]] = queue.Queue(
-    maxsize=64
-)
+
+
+@dataclass
+class _Job:
+    command: dict[str, Any]
+    completed: threading.Event = field(default_factory=threading.Event)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    response: dict[str, Any] | None = None
+    started: bool = False
+    cancelled: bool = False
+
+
+_jobs: queue.Queue[_Job] = queue.Queue(maxsize=64)
 _http_server: ThreadingHTTPServer | None = None
 _http_thread: threading.Thread | None = None
 _bridge_token = ""
@@ -172,19 +183,29 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
 def _process_jobs() -> float:
     for _ in range(16):
         try:
-            command, completed, result_box = _jobs.get_nowait()
+            job = _jobs.get_nowait()
         except queue.Empty:
             break
+
+        with job.lock:
+            if job.cancelled:
+                job.response = {"ok": False, "error": "Operation was cancelled"}
+                job.completed.set()
+                _jobs.task_done()
+                continue
+            job.started = True
+
         try:
-            result_box["response"] = {"ok": True, "result": _execute(command)}
+            response = {"ok": True, "result": _execute(job.command)}
         except Exception as exc:
-            result_box["response"] = {
+            response = {
                 "ok": False,
                 "error": f"{type(exc).__name__}: {exc}",
             }
-        finally:
-            completed.set()
-            _jobs.task_done()
+        with job.lock:
+            job.response = response
+            job.completed.set()
+        _jobs.task_done()
     return 0.05
 
 
@@ -231,17 +252,32 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self._respond(400, {"ok": False, "error": "Command must be an object"})
             return
 
-        completed = threading.Event()
-        result_box: dict[str, Any] = {}
+        job = _Job(command=command)
         try:
-            _jobs.put_nowait((command, completed, result_box))
+            _jobs.put_nowait(job)
         except queue.Full:
             self._respond(503, {"ok": False, "error": "Bridge queue is full"})
             return
-        if not completed.wait(timeout=10):
-            self._respond(504, {"ok": False, "error": "Blender operation timed out"})
+
+        if not job.completed.wait(timeout=10):
+            with job.lock:
+                if not job.started:
+                    job.cancelled = True
+                    self._respond(
+                        504,
+                        {"ok": False, "error": "Operation expired before Blender started it"},
+                    )
+                    return
+            # Supported MVP operations are short. Once execution has started, wait for
+            # the definitive result so a mutation is never reported as a false failure.
+            job.completed.wait()
+
+        with job.lock:
+            response = job.response
+        if response is None:
+            self._respond(500, {"ok": False, "error": "Missing operation result"})
             return
-        self._respond(200, result_box["response"])
+        self._respond(200, response)
 
 
 def _start_bridge() -> None:
