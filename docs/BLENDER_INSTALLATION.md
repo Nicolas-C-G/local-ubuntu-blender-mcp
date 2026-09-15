@@ -27,16 +27,51 @@ blender --version
 
 Inspect the archive before extracting it. The wildcard must identify exactly one intended Blender archive.
 
+## Download the project source
+
+The add-on files are part of this repository; they are not included in the
+Blender archive. On a clean VM, install the required command-line tools and
+clone the branch being tested before packaging the add-on:
+
+```bash
+sudo apt update
+sudo apt install -y git zip unzip
+
+mkdir -p "$HOME/apps"
+cd "$HOME/apps"
+git clone --branch feature/blender-mcp-mvp --single-branch \
+  https://github.com/Nicolas-C-G/local-ubuntu-blender-mcp.git
+
+cd "$HOME/apps/local-ubuntu-blender-mcp"
+git branch --show-current
+```
+
+The last command must print `feature/blender-mcp-mvp`. If the repository is
+already cloned, do not clone it again. Instead, enter the existing repository,
+fetch the latest changes, and verify the branch before continuing:
+
+```bash
+cd "$HOME/apps/local-ubuntu-blender-mcp"
+git fetch origin
+git switch feature/blender-mcp-mvp
+git pull --ff-only
+git branch --show-current
+```
+
 ## Package the custom add-on
 
-From the repository root:
+Use the explicit repository path so this step does not depend on the terminal's
+previous working directory:
 
 ```bash
 rm -f /tmp/blender_mcp_bridge.zip
-cd blender_addon
+
+cd "$HOME/apps/local-ubuntu-blender-mcp/blender_addon"
+test -f blender_mcp_bridge/__init__.py
 zip -r /tmp/blender_mcp_bridge.zip blender_mcp_bridge -x '*/__pycache__/*' '*.pyc'
 unzip -l /tmp/blender_mcp_bridge.zip
-cd ..
+
+cd "$HOME/apps/local-ubuntu-blender-mcp"
 ```
 
 The archive root must contain `blender_mcp_bridge/`, and that directory must contain `__init__.py`.
