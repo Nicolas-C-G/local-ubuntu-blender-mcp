@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-ubuntu-blender-mcp"
+version = "0.1.0"
+description = "OAuth-protected MCP server for constrained Blender control on Ubuntu"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Nicolás Cartes"}]
+dependencies = [
+    "mcp>=2,<3",
+    "PyJWT[crypto]>=2.10,<3",
+]
+
+[project.scripts]
+blender-control-mcp = "blender_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
