@@ -69,10 +69,33 @@ git checkout feature/blender-mcp-mvp
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install .
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest
 ```
 
-For deployment, use `pip install .` rather than editable mode. Record the commit being deployed:
+For a fixed production-like deployment, use `pip install .` rather than
+editable mode. Source edits under `src/` are not automatically reflected in
+the installed package: reinstall it after every checked-out code change.
+
+For active development, use an editable installation instead:
+
+```bash
+.venv/bin/python -m pip install --no-deps --editable .
+```
+
+Verify which file the service environment will import:
+
+```bash
+.venv/bin/python - <<'PY'
+import blender_mcp.auth
+print(blender_mcp.auth.__file__)
+PY
+```
+
+An editable development installation should print a path under the repository's
+`src/blender_mcp` directory. A fixed deployment should print a path under the
+virtual environment's `site-packages` and must be reinstalled after source
+changes. Record the commit being deployed:
 
 ```bash
 git rev-parse --verify HEAD
@@ -137,6 +160,14 @@ Follow [Auth0 configuration](AUTH0.md). The following values must agree exactly:
 
 Keep the trailing slash in `MCP_AUTH_ISSUER`.
 
+Do not continue until all of these Auth0 gates are complete:
+
+- RBAC and **Add Permissions in the Access Token** are enabled for the API;
+- the `Blender Operator` role contains `blender.control`;
+- that role is assigned to the user who will authorize ChatGPT;
+- user-delegated third-party access grants `blender.control`;
+- client access remains disabled.
+
 ## 8. Create the user service
 
 The MCP server belongs to the logged-in desktop user because Blender also runs in that interactive session.
@@ -177,6 +208,17 @@ Load and start it:
 systemctl --user daemon-reload
 systemctl --user enable --now blender-control-mcp.service
 systemctl --user status blender-control-mcp.service --no-pager
+```
+
+Wait for the listener before testing it; an immediate request can race service
+startup:
+
+```bash
+for attempt in $(seq 1 30); do
+  ss -ltn | grep -q '127.0.0.1:8001' && break
+  sleep 1
+done
+ss -ltn | grep '127.0.0.1:8001'
 ```
 
 If the service fails, read [Troubleshooting](TROUBLESHOOTING.md) before weakening its security settings.
@@ -234,7 +276,21 @@ Use this public endpoint in the MCP client:
 https://blender-mcp.example.com/mcp
 ```
 
-Complete the Auth0 authorization flow and grant only the `blender.control` permission. First call `blender_health`, then the read-only tools.
+Choose OAuth with DCR. In ChatGPT's advanced OAuth settings, select
+`blender.control` under **Default scopes** and also enter it under **Base
+scopes**. Complete the Auth0 authorization flow and grant only that API
+permission.
+
+Before testing tools, confirm the public unauthenticated challenge advertises
+the scope:
+
+```bash
+curl -sS -D - -o /dev/null https://blender-mcp.example.com/mcp \
+  | grep -i '^www-authenticate:'
+```
+
+The header must contain `scope="blender.control"`. First call
+`blender_health`, then `blender_list_objects` and the remaining read-only tools.
 
 Do not enable mutations yet.
 

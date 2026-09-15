@@ -17,7 +17,15 @@ Complete this checklist on the target Ubuntu Desktop VM. Record results without 
 - [ ] Unauthenticated local `/mcp` request returns `401`.
 - [ ] Unauthenticated public `/mcp` request returns `401`.
 - [ ] OAuth protected-resource metadata returns `200` JSON.
+- [ ] The public `WWW-Authenticate` challenge contains the protected-resource metadata URL and `scope="blender.control"`.
+- [ ] Auth0 API has **Enable RBAC** and **Add Permissions in the Access Token** enabled.
+- [ ] The `Blender Operator` role contains `blender.control`.
+- [ ] The user authorizing ChatGPT is assigned the `Blender Operator` role.
+- [ ] Auth0 Application Access grants `blender.control` for user-delegated access and disables client access.
+- [ ] The active ChatGPT `tpc_...` client shows `1 / 1` delegated permissions.
+- [ ] ChatGPT requests `blender.control` as both a Default scope and a Base scope.
 - [ ] Auth0 issuer, audience, expiration, subject, signature, and `blender.control` scope are enforced.
+- [ ] Auth0 logs show the current ChatGPT client ID, exact audience, and the required API scope—not only `offline_access`.
 - [ ] A token for Ubuntu MCP is rejected by Blender MCP.
 - [ ] A token without `blender.control` is rejected.
 - [ ] A missing or incorrect bridge token returns `401`.
@@ -37,6 +45,14 @@ With Blender open and the custom add-on enabled:
 - [ ] `blender_get_object` returns a known object's transform.
 - [ ] Unknown object names return a safe error.
 - [ ] List limits outside `1..200` are rejected.
+
+## Deployment consistency tests
+
+- [ ] The active service imports the intended installed or editable `blender_mcp` package.
+- [ ] Source changes were reinstalled when using a non-editable deployment.
+- [ ] `python -m pytest` passes in the deployed virtual environment.
+- [ ] Service checks wait for `127.0.0.1:8001` to listen after a restart.
+- [ ] Obsolete DCR-created ChatGPT applications have been reviewed without deleting the active client.
 
 ## Supervised mutation tests
 

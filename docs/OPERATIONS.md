@@ -100,9 +100,25 @@ git fetch --prune origin
 git checkout feature/blender-mcp-mvp
 git pull --ff-only
 .venv/bin/python -m pip install .
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest
 systemctl --user restart blender-control-mcp.service
 ```
+
+`pip install .` copies the package into the virtual environment. Do not assume
+that editing `src/` changes the running service; reinstall the package, or use
+an editable installation only for active development. Verify the loaded module
+when diagnosing stale code:
+
+```bash
+.venv/bin/python - <<'PY'
+import blender_mcp.auth
+print(blender_mcp.auth.__file__)
+PY
+```
+
+After restart, wait until `127.0.0.1:8001` is listening before issuing an HTTP
+check. A connection refusal during the startup window is not an OAuth failure.
 
 Repackage and reinstall the add-on if `blender_addon/` changed. Record the new commit SHA and repeat the acceptance checklist.
 

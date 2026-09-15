@@ -62,6 +62,36 @@ systemctl --user daemon-reload
 systemctl --user restart blender-control-mcp.service
 ```
 
+## Source changes are not loaded
+
+Check the module path used by the service's virtual environment:
+
+```bash
+cd "$HOME/apps/local-ubuntu-blender-mcp"
+.venv/bin/python - <<'PY'
+import blender_mcp.auth
+print(blender_mcp.auth.__file__)
+PY
+```
+
+If it points into `.venv/.../site-packages`, `pip install .` created a fixed
+copy. Reinstall after source changes:
+
+```bash
+.venv/bin/python -m pip install --force-reinstall --no-deps .
+systemctl --user restart blender-control-mcp.service
+```
+
+During active development, install the project in editable mode instead:
+
+```bash
+.venv/bin/python -m pip install --no-deps --editable .
+```
+
+Do not mix this diagnosis with OAuth configuration: stale installed code can
+make newly added logging or fixes appear ineffective even when Auth0 is
+configured correctly.
+
 ## Port already in use
 
 ```bash
@@ -113,6 +143,26 @@ curl -i https://blender-mcp.example.com/.well-known/oauth-protected-resource/mcp
 
 The response must be JSON from the MCP service, not an HTML Cloudflare error page. Verify the public base URL, resource URL, issuer, Host allowlist, and tunnel route.
 
+## Bearer challenge does not advertise `blender.control`
+
+Inspect the public challenge:
+
+```bash
+curl -sS -D - -o /dev/null https://blender-mcp.example.com/mcp \
+  | grep -i '^www-authenticate:'
+```
+
+It must contain both `resource_metadata="..."` and
+`scope="blender.control"`. MCP Python SDK 2.2.0 did not include the required
+scope in this header by itself; this project adds it with
+`OAuthScopeChallengeMiddleware`. Confirm that the running installation contains
+that middleware and that the service was reinstalled/restarted after the
+change.
+
+The first request without a bearer token returning `401` is expected OAuth
+discovery behavior. A bearer token being rejected afterward is a separate
+token-validation or authorization failure.
+
 ## Access token is rejected
 
 Compare exact claims and configuration:
@@ -129,6 +179,63 @@ timedatectl status
 ```
 
 Do not paste the token into an online decoder.
+
+The verifier's diagnostic messages separate common failures:
+
+- `rejected during JWT validation`: signature, issuer, audience, expiry, token
+  format, or JWKS validation failed;
+- `audience mismatch`: the resource identifier differs;
+- `missing scopes ['blender.control']`: the token is valid for the audience but
+  the API permission was not requested or granted.
+
+Never add logging that prints the bearer token itself.
+
+## Token is valid but `blender.control` is missing
+
+Check all four authorization layers; each is required:
+
+1. ChatGPT has `blender.control` selected as a **Default scope** and entered as
+   a **Base scope**.
+2. Auth0 API RBAC and **Add Permissions in the Access Token** are enabled.
+3. The `Blender Operator` role contains the API permission.
+4. The role is assigned to the actual user authorizing the connector.
+
+Also inspect **Applications -> APIs -> Blender MCP -> Application Access** and
+confirm that the current ChatGPT `tpc_...` application has `1 / 1` delegated
+permissions. In Auth0 events, a correct audience with `scope: null` or only
+`scope: offline_access` is not sufficient.
+
+After correcting these settings, remove the old ChatGPT connector, revoke its
+entry under the user's **Authorized Applications**, and create a fresh
+connector so the authorization and consent flow runs again.
+
+## Dynamic Client Registration reaches the tenant limit
+
+Repeated connector creation can leave multiple third-party ChatGPT applications
+with different `tpc_...` IDs. Delete only obsolete ChatGPT clients under
+**Applications -> Applications**. Keep the client ID associated with the active
+connector.
+
+Deleting a user's **Authorized Applications** entry revokes consent but does
+not necessarily delete the registered client or reduce the tenant's application
+count. These are different cleanup operations.
+
+## Request immediately after restart cannot connect
+
+`systemctl restart` can return before Uvicorn has opened port `8001`. Check the
+service and wait for its listener:
+
+```bash
+systemctl --user status blender-control-mcp.service --no-pager -l
+for attempt in $(seq 1 30); do
+  ss -ltn | grep -q '127.0.0.1:8001' && break
+  sleep 1
+done
+ss -ltn | grep '127.0.0.1:8001'
+```
+
+If the listener never appears, inspect the full service journal. HTTP `000`
+during this startup window does not diagnose an OAuth problem.
 
 ## Read-only tools work but mutation tools fail
 

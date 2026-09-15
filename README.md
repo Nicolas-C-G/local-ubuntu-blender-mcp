@@ -71,6 +71,7 @@ git checkout feature/blender-mcp-mvp
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install pytest
 ```
 
 For production-like deployment, do not continue from this abbreviated section; follow the complete deployment guide.
@@ -78,7 +79,7 @@ For production-like deployment, do not continue from this abbreviated section; f
 ## Tests
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest
 ```
 
 CI installs the package, compiles the add-on source, and runs the unit tests. A real-Blender integration test inside the target VM is still required before a release is described as deployment-validated.
