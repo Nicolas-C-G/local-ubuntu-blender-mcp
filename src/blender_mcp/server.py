@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import uvicorn
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -13,6 +14,7 @@ from pydantic import AnyHttpUrl
 from .auth import OIDCJWTVerifier
 from .auth_helpers import normalize_issuer
 from .controller import BlenderController
+from .oauth_challenge import OAuthScopeChallengeMiddleware
 
 
 controller = BlenderController.from_environment()
@@ -125,13 +127,14 @@ def main() -> None:
     port = int(os.getenv("BLENDER_MCP_PORT", "8001"))
     if not 1024 <= port <= 65535:
         raise ValueError("BLENDER_MCP_PORT must be between 1024 and 65535.")
-    mcp.run(
-        transport="streamable-http",
-        host="127.0.0.1",
-        port=port,
+    app = mcp.streamable_http_app(
+        streamable_http_path="/mcp",
         json_response=True,
         transport_security=transport_security,
+        host="127.0.0.1",
     )
+    app = OAuthScopeChallengeMiddleware(app, required_scopes)
+    uvicorn.run(app, host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":
