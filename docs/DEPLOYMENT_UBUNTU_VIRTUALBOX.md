@@ -103,6 +103,25 @@ git rev-parse --verify HEAD
 
 ## 6. Create protected configuration
 
+The Blender installation procedure may already have created
+`$HOME/.config/blender-mcp/env` with a valid `BLENDER_BRIDGE_TOKEN`. Check
+before copying the example:
+
+```bash
+if [[ -f "$HOME/.config/blender-mcp/env" ]]; then
+  echo "Protected environment already exists; keep it and do not overwrite its bridge token"
+else
+  echo "Protected environment does not exist; initialize it from .env.example below"
+fi
+```
+
+For a new file, run the commands below as written. If the file already exists,
+skip the `cp .env.example "$HOME/.config/blender-mcp/env"` command and the final
+token-generation command, keep the existing bridge token, and add the
+remaining keys from `.env.example` while editing the file. Do not generate a
+replacement bridge token when the existing one is already at least 32
+characters; Blender and the MCP service must use the same value.
+
 ```bash
 mkdir -p "$HOME/.config/blender-mcp" "$HOME/.local/state/blender-mcp"
 cp .env.example "$HOME/.config/blender-mcp/env"
@@ -142,7 +161,8 @@ Do not use shell expressions, `$HOME`, or `~` in this file. systemd environment 
 Verify that no placeholder remains:
 
 ```bash
-if grep -Eq 'example\.com|YOUR_|REPLACE_|PASTE_' "$HOME/.config/blender-mcp/env"; then
+if [[ -f "$HOME/.config/blender-mcp/env" ]] \
+  && grep -Eq 'example\.com|YOUR_|REPLACE_|PASTE_' "$HOME/.config/blender-mcp/env"; then
   echo 'ERROR: configuration still contains placeholders'
 else
   echo 'Configuration placeholders cleared'
@@ -150,6 +170,12 @@ fi
 ```
 
 ## 7. Configure Auth0
+
+On a first deployment, complete sections 1 through 5 of
+[Auth0 configuration](AUTH0.md), but do not run its service-restart commands
+yet: the user service is created in section 8 below. Defer Auth0 sections 6 and
+7 until this guide has started the service and configured Cloudflare in
+section 11.
 
 Follow [Auth0 configuration](AUTH0.md). The following values must agree exactly:
 
@@ -171,6 +197,32 @@ Do not continue until all of these Auth0 gates are complete:
 ## 8. Create the user service
 
 The MCP server belongs to the logged-in desktop user because Blender also runs in that interactive session.
+
+Before creating the unit, verify that its executable and environment file
+exist and that the configuration has no example placeholders:
+
+```bash
+cd "$HOME/apps/local-ubuntu-blender-mcp"
+
+if [[ -x .venv/bin/blender-control-mcp ]]; then
+  echo "MCP executable found"
+else
+  echo "ERROR: install the MCP package before creating the service" >&2
+fi
+
+if [[ -f "$HOME/.config/blender-mcp/env" ]]; then
+  echo "Protected environment found"
+else
+  echo "ERROR: complete section 6 before creating the service" >&2
+fi
+
+if [[ -f "$HOME/.config/blender-mcp/env" ]] \
+  && grep -Eq 'example\.com|YOUR_|REPLACE_|PASTE_' "$HOME/.config/blender-mcp/env"; then
+  echo "ERROR: protected environment still contains placeholders" >&2
+fi
+```
+
+Do not create or start the unit while any preflight command reports an error.
 
 ```bash
 mkdir -p "$HOME/.config/systemd/user"
@@ -202,12 +254,30 @@ ReadWritePaths=/home/YOUR_USERNAME/.local/state/blender-mcp
 WantedBy=default.target
 ```
 
+Validate the unit before loading it:
+
+```bash
+systemd-analyze --user verify \
+  "$HOME/.config/systemd/user/blender-control-mcp.service"
+```
+
 Load and start it:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now blender-control-mcp.service
 systemctl --user status blender-control-mcp.service --no-pager
+```
+
+If a later restart reports `Unit blender-control-mcp.service not found`, check
+whether the file is installed and reload the user manager before retrying:
+
+```bash
+test -f "$HOME/.config/systemd/user/blender-control-mcp.service" \
+  && echo "Service file found" \
+  || echo "Service file missing; create it in section 8"
+systemctl --user daemon-reload
+systemctl --user cat blender-control-mcp.service
 ```
 
 Wait for the listener before testing it; an immediate request can race service

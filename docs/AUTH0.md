@@ -110,6 +110,28 @@ MCP_AUTH_ISSUER=https://YOUR_AUTH0_TENANT.auth0.com/
 MCP_AUTH_REQUIRED_SCOPES=blender.control
 ```
 
+### First-deployment service prerequisite
+
+The restart commands below require the systemd user unit to exist. During a
+first deployment, the canonical guide does not create
+`blender-control-mcp.service` until
+[deployment section 8](DEPLOYMENT_UBUNTU_VIRTUALBOX.md#8-create-the-user-service).
+After saving the Auth0 values, check for the unit before attempting a restart:
+
+```bash
+if systemctl --user cat blender-control-mcp.service >/dev/null 2>&1; then
+  echo "MCP user service is installed"
+else
+  echo "MCP user service is not installed yet; continue with deployment section 8"
+fi
+```
+
+If the second message appears, do not run the restart commands yet. Return to
+the canonical deployment guide, create and start the user service in section
+8, and then continue with the local checks. `Unit
+blender-control-mcp.service not found` and an empty journal mean the unit has
+not been created or loaded; they do not indicate an Auth0 failure.
+
 Restart after a change:
 
 ```bash
@@ -120,6 +142,10 @@ journalctl --user -u blender-control-mcp.service -n 50 --no-pager
 ## 6. Verify discovery and rejection
 
 After Cloudflare is configured, verify protected-resource metadata:
+
+During a first deployment, defer this section until the MCP user service is
+running and Cloudflare has been completed in
+[deployment section 11](DEPLOYMENT_UBUNTU_VIRTUALBOX.md#11-configure-cloudflare).
 
 ```bash
 curl -i https://blender-mcp.example.com/.well-known/oauth-protected-resource/mcp
