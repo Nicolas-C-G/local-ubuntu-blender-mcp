@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import json
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from blender_mcp.bridge import BlenderBridgeClient, BridgeError
+
+
+TOKEN = "a" * 32
+
+
+class FakeHandler(BaseHTTPRequestHandler):
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+    def do_POST(self) -> None:
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            self.send_response(401)
+            self.end_headers()
+            return
+        length = int(self.headers["Content-Length"])
+        request = json.loads(self.rfile.read(length))
+        response = json.dumps(
+            {"ok": True, "result": {"received": request["action"]}}
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
+class BlenderBridgeClientTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        host, port = self.server.server_address
+        self.client = BlenderBridgeClient(
+            endpoint=f"http://{host}:{port}/command",
+            token=TOKEN,
+        )
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+    def test_authenticated_json_round_trip(self) -> None:
+        self.assertEqual(self.client.call("health")["received"], "health")
+
+    def test_action_allowlist_blocks_unknown_commands(self) -> None:
+        with self.assertRaisesRegex(BridgeError, "not allowed"):
+            self.client.call("execute_python", {"code": "print('unsafe')"})
+
+    def test_non_loopback_endpoint_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "loopback"):
+            BlenderBridgeClient(
+                endpoint="https://example.com/command",
+                token=TOKEN,
+            )
+
+    def test_short_bridge_token_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 32"):
+            BlenderBridgeClient(
+                endpoint="http://127.0.0.1:8765/command",
+                token="short",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
