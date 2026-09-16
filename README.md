@@ -1,2 +1,96 @@
-# local-ubuntu-blender-mcp
-Secure MCP server that lets ChatGPT inspect and control Blender through a constrained local bridge on Ubuntu.
+# Local Ubuntu Blender MCP
+
+A secure, OAuth-protected Model Context Protocol server that lets ChatGPT inspect and make constrained changes to Blender running on an Ubuntu desktop.
+
+This is an independent, security-focused implementation inspired by the Local Ubuntu MCP architecture. It is not Blender's official Lab MCP server. In particular, it does not expose arbitrary Python or shell execution.
+
+> [!WARNING]
+> This software controls an interactive Blender session. Keep mutations disabled until authentication, bridge isolation, and audit logging have been verified.
+
+## Capabilities
+
+| MCP tool | Default | Purpose |
+| --- | --- | --- |
+| `blender_health` | Enabled | Check Blender version, current file, and bridge status |
+| `blender_get_scene` | Enabled | Read scene, frame, renderer, camera, selection, and object count |
+| `blender_list_objects` | Enabled | List up to 200 scene objects and their transforms |
+| `blender_get_object` | Enabled | Inspect one named object |
+| `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
+| `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
+
+Supported primitives are `CUBE`, `UV_SPHERE`, `CYLINDER`, `CONE`, `TORUS`, and `PLANE`. Rotation values are radians.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["ChatGPT"] -->|"OAuth and HTTPS"| B["Cloudflare Tunnel"]
+    B --> C["Blender MCP :8001"]
+    C -->|"Token-authenticated loopback"| D["Blender bridge :8765"]
+    D -->|"Main-thread queue"| E["Blender Python API"]
+```
+
+There are two authentication boundaries:
+
+1. Auth0 protects the public MCP resource with the `blender.control` scope.
+2. A separate high-entropy secret protects the loopback bridge between the MCP process and Blender.
+
+The bridge accepts only named, validated operations and binds to `127.0.0.1`. Never publish port `8765` through Cloudflare, a firewall rule, VirtualBox port forwarding, or a router.
+
+## Deployment documentation
+
+Start with [Deployment on Ubuntu Desktop in VirtualBox](docs/DEPLOYMENT_UBUNTU_VIRTUALBOX.md).
+
+| Document | Purpose |
+| --- | --- |
+| [VirtualBox preparation](docs/VIRTUALBOX.md) | VM sizing, NAT, graphics, snapshots, and Guest Additions |
+| [Blender and add-on installation](docs/BLENDER_INSTALLATION.md) | Install Blender and the custom bridge |
+| [Auth0 configuration](docs/AUTH0.md) | API, audience, scope, issuer, and login setup |
+| [Cloudflare Tunnel](docs/CLOUDFLARE.md) | Add a dedicated hostname to a new or existing named tunnel |
+| [Operations](docs/OPERATIONS.md) | Start, stop, update, rotate secrets, and control mutations |
+| [Security model](docs/SECURITY.md) | Trust boundaries, controls, and residual risks |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common VM, Blender, OAuth, tunnel, and port failures |
+| [Acceptance checklist](docs/ACCEPTANCE_CHECKLIST.md) | Evidence required before enabling mutations |
+| [Automation status](docs/AUTOMATION_STATUS.md) | Manual steps and deployment scripts still to be implemented |
+
+## Development setup
+
+Requirements:
+
+- Ubuntu Desktop
+- Blender 4.2+ at code level; Blender 5.1+ is the initial deployment-validation baseline
+- Python 3.11+
+- An Auth0 API for the public MCP resource
+- A Cloudflare named tunnel for remote ChatGPT access
+
+```bash
+git clone https://github.com/Nicolas-C-G/local-ubuntu-blender-mcp.git
+cd local-ubuntu-blender-mcp
+git checkout feature/blender-mcp-mvp
+
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install pytest
+```
+
+For production-like deployment, do not continue from this abbreviated section; follow the complete deployment guide.
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest
+```
+
+CI installs the package, compiles the add-on source, and runs the unit tests. A real-Blender integration test inside the target VM is still required before a release is described as deployment-validated.
+
+## Current limitations
+
+- Blender must remain open with the custom add-on enabled.
+- Saving, deleting, rendering, materials, modifiers, undo checkpoints, and file export are intentionally deferred.
+- Deployment is currently documented as a manual procedure; install and verification shell scripts are not yet present.
+- The `.mcpb` bundle mentioned by Blender's official Lab project is not used by this remote OAuth/Cloudflare architecture.
+
+## License
+
+MIT
