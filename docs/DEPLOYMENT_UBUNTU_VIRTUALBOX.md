@@ -229,7 +229,9 @@ mkdir -p "$HOME/.config/systemd/user"
 nano "$HOME/.config/systemd/user/blender-control-mcp.service"
 ```
 
-Paste the following, replacing `YOUR_USERNAME` in both paths:
+Paste the following exactly as written. The systemd specifier `%h`
+automatically expands to the current user's home directory (for example,
+`/home/Ubuntu`), so no username replacement is required:
 
 ```ini
 [Unit]
@@ -239,16 +241,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/home/YOUR_USERNAME/.config/blender-mcp/env
-ExecStart=/home/YOUR_USERNAME/apps/local-ubuntu-blender-mcp/.venv/bin/blender-control-mcp
-WorkingDirectory=/home/YOUR_USERNAME/apps/local-ubuntu-blender-mcp
+EnvironmentFile=%h/.config/blender-mcp/env
+ExecStart=%h/apps/local-ubuntu-blender-mcp/.venv/bin/blender-control-mcp
+WorkingDirectory=%h/apps/local-ubuntu-blender-mcp
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/YOUR_USERNAME/.local/state/blender-mcp
+ReadWritePaths=%h/.local/state/blender-mcp
 
 [Install]
 WantedBy=default.target
