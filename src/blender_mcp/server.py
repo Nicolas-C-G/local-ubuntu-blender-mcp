@@ -7,7 +7,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
@@ -16,14 +16,11 @@ from .auth_helpers import normalize_issuer
 from .controller import BlenderController
 from .oauth_challenge import OAuthScopeChallengeMiddleware
 
-
 controller = BlenderController.from_environment()
 issuer = normalize_issuer(os.environ["MCP_AUTH_ISSUER"])
 resource_url = os.environ["MCP_RESOURCE_URL"].strip()
 required_scopes = [
-    item
-    for item in os.getenv("MCP_AUTH_REQUIRED_SCOPES", "blender.control").split()
-    if item
+    item for item in os.getenv("MCP_AUTH_REQUIRED_SCOPES", "blender.control").split() if item
 ]
 allowed_hosts = [
     item.strip()
@@ -34,9 +31,7 @@ allowed_hosts = [
     if item.strip()
 ]
 allowed_origins = [
-    item.strip()
-    for item in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",")
-    if item.strip()
+    item.strip() for item in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",") if item.strip()
 ]
 
 transport_security = TransportSecuritySettings(
@@ -85,6 +80,28 @@ def blender_list_objects(limit: int = 100) -> dict[str, Any]:
 def blender_get_object(name: str) -> dict[str, Any]:
     """Read type, transform, visibility, and selection state for one object."""
     return controller.get_object(name)
+
+
+@mcp.tool()
+def blender_turntable_start(name: str, views: int = 12) -> dict[str, Any]:
+    """Start a bounded 360-degree viewport preview of a geometry object.
+
+    Use blender_turntable_status until completed, then blender_turntable_sheet.
+    Blender must have an open 3D viewport. The scene cannot be changed during capture.
+    """
+    return controller.start_turntable(name, views)
+
+
+@mcp.tool()
+def blender_turntable_status(job_id: str) -> dict[str, Any]:
+    """Check progress of a 360-degree viewport preview job."""
+    return controller.turntable_status(job_id)
+
+
+@mcp.tool()
+def blender_turntable_sheet(job_id: str) -> Image:
+    """Return a completed object's 360-degree viewport contact sheet as a PNG image."""
+    return Image(data=controller.turntable_sheet(job_id), format="png")
 
 
 @mcp.tool()

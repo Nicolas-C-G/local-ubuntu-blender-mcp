@@ -7,13 +7,18 @@ import json
 import math
 import os
 import queue
+import shutil
+import tempfile
 import threading
+import time
+import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import bpy
-
+from mathutils import Quaternion, Vector
 
 bl_info = {
     "name": "Blender MCP Bridge",
@@ -42,6 +47,10 @@ _jobs: queue.Queue[_Job] = queue.Queue(maxsize=64)
 _http_server: ThreadingHTTPServer | None = None
 _http_thread: threading.Thread | None = None
 _bridge_token = ""
+_previews: dict[str, dict[str, Any]] = {}
+_preview_root: Path | None = None
+_active_preview: str | None = None
+_PREVIEW_TTL = 600
 
 
 def _vector(arguments: dict[str, Any], key: str, *, positive: bool = False) -> list[float]:
@@ -94,6 +103,61 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
     arguments = command.get("arguments", {})
     if not isinstance(action, str) or not isinstance(arguments, dict):
         raise ValueError("Invalid bridge command")
+
+    if action == "start_turntable":
+        global _active_preview
+        if _active_preview is not None:
+            raise ValueError("A turntable is already running")
+        name = _name(arguments)
+        obj = bpy.context.scene.objects.get(name)
+        if obj is None or obj.type not in {"MESH", "CURVE", "SURFACE", "FONT", "META"}:
+            raise ValueError("Choose a visible geometry object in the current scene")
+        views = arguments.get("views")
+        if type(views) is not int or views not in {8, 12, 16, 24}:
+            raise ValueError("views must be 8, 12, 16, or 24")
+        area_info = _find_viewport()
+        if area_info is None:
+            raise ValueError("Open a Blender window with a 3D viewport first")
+        if _preview_root is None:
+            raise RuntimeError("Preview storage is unavailable")
+        bounds = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        center = sum(bounds, Vector()) / len(bounds)
+        radius = max((point - center).length for point in bounds)
+        if radius <= 0 or not math.isfinite(radius):
+            raise ValueError("Object bounds cannot be framed")
+        job_id = uuid.uuid4().hex
+        (_preview_root / job_id).mkdir()
+        _previews[job_id] = {
+            "state": "running",
+            "views": views,
+            "completed": 0,
+            "created": time.monotonic(),
+            "center": center,
+            "distance": max(2.5 * radius, 0.5),
+            "area_info": area_info,
+            "name": name,
+        }
+        _active_preview = job_id
+        return {"job_id": job_id, "state": "running", "views": views, "completed": 0}
+
+    if action == "turntable_status":
+        job_id = arguments.get("job_id")
+        if (
+            not isinstance(job_id, str)
+            or len(job_id) != 32
+            or any(c not in "0123456789abcdef" for c in job_id)
+        ):
+            raise ValueError("Invalid turntable job ID")
+        job = _previews.get(job_id)
+        if job is None:
+            raise ValueError("Turntable job was not found or has expired")
+        return {key: job[key] for key in ("state", "views", "completed")} | {
+            "job_id": job_id,
+            "error": job.get("error"),
+        }
+
+    if action in {"create_primitive", "set_transform"} and _active_preview is not None:
+        raise ValueError("Scene changes are unavailable while a turntable is running")
 
     if action == "health":
         return {
@@ -180,7 +244,105 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
     raise ValueError("Action is not allowed")
 
 
+def _find_viewport() -> tuple[Any, Any, Any] | None:
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == "VIEW_3D":
+                region = next((item for item in area.regions if item.type == "WINDOW"), None)
+                if region is not None:
+                    return window, area, region
+    return None
+
+
+def _capture_next_frame() -> None:
+    global _active_preview
+    job_id = _active_preview
+    if job_id is None:
+        return
+    job = _previews[job_id]
+    index = job["completed"]
+    window, area, region = job["area_info"]
+    view = area.spaces.active.region_3d
+    scene = window.scene
+    old_view = (
+        view.view_location.copy(),
+        view.view_rotation.copy(),
+        view.view_distance,
+        view.view_perspective,
+    )
+    old_render = (
+        scene.render.filepath,
+        scene.render.resolution_x,
+        scene.render.resolution_y,
+        scene.render.resolution_percentage,
+        scene.render.image_settings.file_format,
+    )
+    old_visibility = [(obj, obj.hide_get(view_layer=window.view_layer)) for obj in scene.objects]
+    try:
+        if area.type != "VIEW_3D" or _preview_root is None:
+            raise RuntimeError("The 3D viewport was closed")
+        target = scene.objects.get(job["name"])
+        if target is None:
+            raise RuntimeError("The preview object was removed")
+        for obj, _ in old_visibility:
+            obj.hide_set(obj != target, view_layer=window.view_layer)
+        angle = index * 2 * math.pi / job["views"]
+        # The view rotates around the world Z axis; a slight elevation reveals depth.
+        view.view_perspective = "PERSP"
+        view.view_location = job["center"]
+        view.view_distance = job["distance"]
+        view.view_rotation = Quaternion((0, 0, 1), angle) @ Quaternion((1, 0, 0), math.radians(65))
+        path = _preview_root / job_id / f"{index}.png"
+        scene.render.filepath = str(path)
+        scene.render.resolution_x = 320
+        scene.render.resolution_y = 320
+        scene.render.resolution_percentage = 100
+        scene.render.image_settings.file_format = "PNG"
+        with bpy.context.temp_override(window=window, area=area, region=region):
+            outcome = bpy.ops.render.opengl(write_still=True, view_context=True)
+        if "FINISHED" not in outcome or not path.is_file() or path.stat().st_size > 2_000_000:
+            raise RuntimeError("Blender did not produce a bounded viewport image")
+        job["completed"] += 1
+        if job["completed"] == job["views"]:
+            job["state"] = "completed"
+            _active_preview = None
+    except Exception as exc:
+        job["state"] = "failed"
+        job["error"] = f"{type(exc).__name__}: {exc}"
+        _active_preview = None
+    finally:
+        for obj, hidden in old_visibility:
+            obj.hide_set(hidden, view_layer=window.view_layer)
+        view.view_location, view.view_rotation, view.view_distance, view.view_perspective = old_view
+        (
+            scene.render.filepath,
+            scene.render.resolution_x,
+            scene.render.resolution_y,
+            scene.render.resolution_percentage,
+            scene.render.image_settings.file_format,
+        ) = old_render
+
+
+def _expire_previews() -> None:
+    for job_id, job in list(_previews.items()):
+        if job_id != _active_preview and time.monotonic() - job["created"] > _PREVIEW_TTL:
+            del _previews[job_id]
+            if _preview_root is not None:
+                shutil.rmtree(_preview_root / job_id, ignore_errors=True)
+
+
 def _process_jobs() -> float:
+    global _active_preview
+    _expire_previews()
+    if _active_preview is not None:
+        try:
+            _capture_next_frame()
+        except Exception as exc:
+            job = _previews.get(_active_preview)
+            if job is not None:
+                job["state"] = "failed"
+                job["error"] = f"{type(exc).__name__}: {exc}"
+            _active_preview = None
     for _ in range(16):
         try:
             job = _jobs.get_nowait()
@@ -214,6 +376,41 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
     def log_message(self, _format: str, *_args: Any) -> None:
         return
+
+    def do_GET(self) -> None:
+        if not hmac.compare_digest(
+            self.headers.get("Authorization", ""), f"Bearer {_bridge_token}"
+        ):
+            self.send_error(401)
+            return
+        parts = self.path.split("/")
+        if len(parts) != 4 or parts[1] != "preview" or not parts[3].isdigit():
+            self.send_error(404)
+            return
+        job_id, index = parts[2], int(parts[3])
+        job = _previews.get(job_id)
+        if (
+            job is None
+            or job.get("state") != "completed"
+            or index >= job["views"]
+            or _preview_root is None
+        ):
+            self.send_error(404)
+            return
+        path = _preview_root / job_id / f"{index}.png"
+        try:
+            if not path.is_file() or path.stat().st_size > 2_000_000:
+                raise OSError("Missing or oversized preview")
+            content = path.read_bytes()
+        except OSError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(content)
 
     def _respond(self, status: int, document: dict[str, Any]) -> None:
         encoded = json.dumps(document, separators=(",", ":")).encode("utf-8")
@@ -281,7 +478,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
 
 def _start_bridge() -> None:
-    global _http_server, _http_thread, _bridge_token
+    global _http_server, _http_thread, _bridge_token, _preview_root
     token = os.environ.get("BLENDER_BRIDGE_TOKEN", "")
     if len(token) < 32:
         raise RuntimeError(
@@ -292,6 +489,7 @@ def _start_bridge() -> None:
     if not 1024 <= port <= 65535:
         raise RuntimeError("BLENDER_BRIDGE_PORT must be between 1024 and 65535")
     _bridge_token = token
+    _preview_root = Path(tempfile.mkdtemp(prefix="blender-mcp-preview-"))
     _http_server = ThreadingHTTPServer(("127.0.0.1", port), _BridgeHandler)
     _http_thread = threading.Thread(
         target=_http_server.serve_forever,
@@ -303,7 +501,7 @@ def _start_bridge() -> None:
 
 
 def _stop_bridge() -> None:
-    global _http_server, _http_thread, _bridge_token
+    global _http_server, _http_thread, _bridge_token, _preview_root, _active_preview
     if _http_server is not None:
         _http_server.shutdown()
         _http_server.server_close()
@@ -314,6 +512,11 @@ def _stop_bridge() -> None:
     _http_server = None
     _http_thread = None
     _bridge_token = ""
+    _active_preview = None
+    _previews.clear()
+    if _preview_root is not None:
+        shutil.rmtree(_preview_root, ignore_errors=True)
+        _preview_root = None
 
 
 def register() -> None:

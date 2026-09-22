@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from blender_mcp.bridge import BlenderBridgeClient, BridgeError
-
 
 TOKEN = "a" * 32
 
@@ -22,14 +22,28 @@ class FakeHandler(BaseHTTPRequestHandler):
             return
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
-        response = json.dumps(
-            {"ok": True, "result": {"received": request["action"]}}
-        ).encode("utf-8")
+        response = json.dumps({"ok": True, "result": {"received": request["action"]}}).encode(
+            "utf-8"
+        )
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))
         self.end_headers()
         self.wfile.write(response)
+
+    def do_GET(self) -> None:
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            self.send_response(401)
+            self.end_headers()
+            return
+        payload = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2ZkAAAAASUVORK5CYII="
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
 
 class BlenderBridgeClientTests(unittest.TestCase):
@@ -68,6 +82,13 @@ class BlenderBridgeClientTests(unittest.TestCase):
                 endpoint="http://127.0.0.1:8765/command",
                 token="short",
             )
+
+    def test_turntable_frame_is_authenticated_png(self) -> None:
+        self.assertTrue(self.client.turntable_frame("a" * 32, 0).startswith(b"\x89PNG"))
+
+    def test_frame_path_validation(self) -> None:
+        with self.assertRaisesRegex(BridgeError, "Invalid"):
+            self.client.turntable_frame("../etc/passwd", 0)
 
 
 if __name__ == "__main__":
