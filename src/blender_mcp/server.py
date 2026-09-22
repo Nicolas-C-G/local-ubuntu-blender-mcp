@@ -140,6 +140,16 @@ def blender_set_transform(
     return controller.set_transform(name, location, rotation, scale)
 
 
+@mcp.tool()
+def blender_create_collection(name: str, object_names: list[str]) -> dict[str, Any]:
+    """Create a collection in the current scene and move the named objects into it.
+
+    Requires mutations enabled. Every object must exist in the current scene;
+    duplicate names or an existing collection name cause the call to fail.
+    """
+    return controller.create_collection(name, object_names)
+
+
 def main() -> None:
     port = int(os.getenv("BLENDER_MCP_PORT", "8001"))
     if not 1024 <= port <= 65535:
