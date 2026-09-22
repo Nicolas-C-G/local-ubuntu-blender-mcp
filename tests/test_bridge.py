@@ -65,6 +65,12 @@ class BlenderBridgeClientTests(unittest.TestCase):
     def test_authenticated_json_round_trip(self) -> None:
         self.assertEqual(self.client.call("health")["received"], "health")
 
+    def test_collection_action_is_allowlisted(self) -> None:
+        result = self.client.call("create_collection", {
+            "name": "RobotArm", "object_names": ["Cube"]
+        })
+        self.assertEqual(result["received"], "create_collection")
+
     def test_action_allowlist_blocks_unknown_commands(self) -> None:
         with self.assertRaisesRegex(BridgeError, "not allowed"):
             self.client.call("execute_python", {"code": "print('unsafe')"})

@@ -19,6 +19,7 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_turntable_status` | Enabled | Read capture progress and errors |
 | `blender_turntable_sheet` | Enabled | Return the completed contact sheet as an MCP image |
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
+| `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
 
 Supported primitives are `CUBE`, `UV_SPHERE`, `CYLINDER`, `CONE`, `TORUS`, and `PLANE`. Rotation values are radians.
@@ -26,15 +27,16 @@ Supported primitives are `CUBE`, `UV_SPHERE`, `CYLINDER`, `CONE`, `TORUS`, and `
 ### 360° viewport preview
 
 With Blender open on a desktop and a 3D View visible, call `blender_turntable_start`
-with an object name and `views` of 8, 12 (default), 16, or 24. Poll
+with a geometry object or collection name and `views` of 8, 12 (default), 16, or 24. Poll
 `blender_turntable_status(job_id)` until `state` is `completed`, then call
 `blender_turntable_sheet(job_id)` to see a labeled PNG contact sheet in the MCP
 client. Failed jobs report an error in the status response. Captures expire after
 10 minutes; download the sheet before then. Only one capture can run at a time.
-The tool rotates the viewport around the selected object's bounding box; it
+The tool rotates the viewport around the selected object's bounding box or the
+combined bounds of the collection's geometry objects (including child collections); it
 does not rotate or save the model. It restores the original viewport and render
 settings after each frame. Other scene objects are hidden temporarily for each
-frame so the sheet focuses on the named object. The scene is temporarily blocked from changes by
+frame so the sheet focuses on the named object or collection. The scene is temporarily blocked from changes by
 this bridge while capture is running. Other manual edits in Blender during a
 capture may still affect the result, so leave the scene idle until it finishes.
 
@@ -44,6 +46,10 @@ into one 1280 px wide sheet. Images never go through the bridge JSON response.
 This is a turntable around the world's vertical axis, not a full spherical view;
 top and bottom views are future extensions. Verify the first capture against
 the visible Blender scene in the target VM before relying on the preview.
+
+### Collections
+
+For example, `blender_create_collection(name="RobotArm", object_names=["Cube", "RobotArm_Pedestal"])` creates a new scene collection and moves both existing objects into it. The tool accepts 1 to 200 distinct names. It checks every object before changing the scene, rejects an existing collection name, and preserves object links in other scenes. Enable mutations to use it. Save the `.blend` file in Blender to keep the change across sessions.
 
 ## Architecture
 

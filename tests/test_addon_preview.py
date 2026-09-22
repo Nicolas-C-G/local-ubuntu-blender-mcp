@@ -1,0 +1,138 @@
+"""Exercise Blender add-on target resolution without starting a GUI."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import tempfile
+import types
+import unittest
+import math
+from pathlib import Path
+from unittest.mock import patch
+
+
+class FakeCollection:
+    def __init__(self, name: str, objects: list[object] | None = None) -> None:
+        self.name = name
+        self.children: list[FakeCollection] = []
+        self.objects = objects or []
+
+    @property
+    def all_objects(self) -> list[object]:
+        return self.objects + [obj for child in self.children for obj in child.all_objects]
+
+
+class FakeObject:
+    def __init__(self, name: str, object_type: str = "MESH", x: float = 0) -> None:
+        self.name = name
+        self.type = object_type
+        self.matrix_world = FakeMatrix(x)
+        self.bound_box = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
+
+
+class FakeVector:
+    def __init__(self, values: tuple[float, ...]) -> None:
+        self.values = values
+
+    def __getitem__(self, index: int) -> float:
+        return self.values[index]
+
+    def __add__(self, other: FakeVector) -> FakeVector:
+        return FakeVector(tuple(a + b for a, b in zip(self.values, other.values)))
+
+    def __sub__(self, other: FakeVector) -> FakeVector:
+        return FakeVector(tuple(a - b for a, b in zip(self.values, other.values)))
+
+    def __truediv__(self, number: float) -> FakeVector:
+        return FakeVector(tuple(value / number for value in self.values))
+
+    @property
+    def length(self) -> float:
+        return math.sqrt(sum(value * value for value in self.values))
+
+
+class FakeMatrix:
+    def __init__(self, x: float) -> None:
+        self.x = x
+
+    def __matmul__(self, point: FakeVector) -> FakeVector:
+        return FakeVector((point[0] + self.x, point[1], point[2]))
+
+
+class AddonPreviewTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.pedestal = FakeObject("Pedestal")
+        self.grip = FakeObject("Grip", x=10)
+        self.light = FakeObject("Light", "LIGHT")
+        self.nested = FakeCollection("Gripper", [self.grip])
+        self.assembly = FakeCollection("RobotArm", [self.pedestal, self.light])
+        self.assembly.children.append(self.nested)
+        self.scene_root = FakeCollection("Scene")
+        self.scene_root.children.append(self.assembly)
+        self.scene = types.SimpleNamespace(
+            collection=self.scene_root,
+            objects={obj.name: obj for obj in (self.pedestal, self.grip, self.light)},
+        )
+        bpy = types.ModuleType("bpy")
+        bpy.types = types.SimpleNamespace(Object=FakeObject, Collection=FakeCollection)
+        bpy.data = types.SimpleNamespace(collections={"RobotArm": self.assembly})
+        mathutils = types.ModuleType("mathutils")
+        mathutils.Vector = FakeVector
+        mathutils.Quaternion = object
+        path = Path(__file__).resolve().parents[1] / "blender_addon/blender_mcp_bridge/__init__.py"
+        spec = importlib.util.spec_from_file_location("test_blender_bridge_addon", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {"bpy": bpy, "mathutils": mathutils,
+                                      spec.name: module}):
+            spec.loader.exec_module(module)
+        self.addon = module
+        bpy.context = types.SimpleNamespace(scene=self.scene)
+
+    def test_collection_includes_nested_geometry_but_not_lights(self) -> None:
+        objects = self.addon._preview_objects("RobotArm", self.scene)
+        self.assertEqual([obj.name for obj in objects], ["Pedestal", "Grip"])
+
+    def test_object_target_still_resolves(self) -> None:
+        self.assertEqual(self.addon._preview_objects("Grip", self.scene), [self.grip])
+
+    def test_collection_takes_precedence_when_object_shares_name(self) -> None:
+        self.scene.objects["RobotArm"] = FakeObject("RobotArm")
+        self.assertEqual(
+            [obj.name for obj in self.addon._preview_objects("RobotArm", self.scene)],
+            ["Pedestal", "Grip"],
+        )
+
+    def test_collection_must_be_in_current_scene_and_have_geometry(self) -> None:
+        other = FakeCollection("Other", [FakeObject("MeshOutside")])
+        self.addon.bpy.data.collections["Other"] = other
+        with self.assertRaisesRegex(ValueError, "current scene"):
+            self.addon._preview_objects("Other", self.scene)
+        empty = FakeCollection("Empty", [self.light])
+        self.scene_root.children.append(empty)
+        self.addon.bpy.data.collections["Empty"] = empty
+        with self.assertRaisesRegex(ValueError, "no geometry"):
+            self.addon._preview_objects("Empty", self.scene)
+
+    def test_collection_creation_is_blocked_during_preview(self) -> None:
+        self.addon._active_preview = "a" * 32
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            self.addon._execute({"action": "create_collection", "arguments": {}})
+
+    def test_turntable_frames_combined_collection_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.addon._preview_root = Path(directory)
+            with patch.object(self.addon, "_find_viewport", return_value=(None, None, None)):
+                result = self.addon._execute({
+                    "action": "start_turntable",
+                    "arguments": {"name": "RobotArm", "views": 8},
+                })
+            job = self.addon._previews[result["job_id"]]
+            self.assertEqual(job["object_names"], ("Pedestal", "Grip"))
+            self.assertAlmostEqual(job["center"][0], 5.0)
+            self.assertGreater(job["distance"], 12)
+
+
+if __name__ == "__main__":
+    unittest.main()

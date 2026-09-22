@@ -98,6 +98,23 @@ class BlenderControllerTests(unittest.TestCase):
                 [1, 0, 1],
             )
 
+    def test_create_collection_requires_mutation_gate(self) -> None:
+        with self.assertRaisesRegex(ControlError, "disabled"):
+            self.controller.create_collection("RobotArm", ["Cube"])
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_create_collection_validates_and_forwards_names(self) -> None:
+        self.controller.mutations_enabled = True
+        result = self.controller.create_collection(" RobotArm ", [" Cube ", "Shoulder"])
+        self.assertEqual(result["action"], "create_collection")
+        self.assertEqual(result["arguments"], {
+            "name": "RobotArm", "object_names": ["Cube", "Shoulder"]
+        })
+        for names in ([], ["Cube", "Cube"], ["Cube", 42], ["Cube"] * 201):
+            with self.subTest(names=names[:3]), self.assertRaises(ControlError):
+                self.controller.create_collection("RobotArm", names)  # type: ignore[arg-type]
+        self.assertEqual(len(self.bridge.calls), 1)
+
     def test_bridge_failure_is_safe_and_audited(self) -> None:
         self.bridge.error = "Blender is unavailable."
         with self.assertRaisesRegex(ControlError, "unavailable"):
