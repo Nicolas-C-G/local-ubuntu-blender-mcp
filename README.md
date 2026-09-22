@@ -19,6 +19,7 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_turntable_status` | Enabled | Read capture progress and errors |
 | `blender_turntable_sheet` | Enabled | Return the completed contact sheet as an MCP image |
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
+| `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
 
 Supported primitives are `CUBE`, `UV_SPHERE`, `CYLINDER`, `CONE`, `TORUS`, and `PLANE`. Rotation values are radians.
@@ -44,6 +45,10 @@ into one 1280 px wide sheet. Images never go through the bridge JSON response.
 This is a turntable around the world's vertical axis, not a full spherical view;
 top and bottom views are future extensions. Verify the first capture against
 the visible Blender scene in the target VM before relying on the preview.
+
+### Collections
+
+For example, `blender_create_collection(name="RobotArm", object_names=["Cube", "RobotArm_Pedestal"])` creates a new scene collection and moves both existing objects into it. The tool accepts 1 to 200 distinct names. It checks every object before changing the scene, rejects an existing collection name, and preserves object links in other scenes. Enable mutations to use it. Save the `.blend` file in Blender to keep the change across sessions.
 
 ## Architecture
 
