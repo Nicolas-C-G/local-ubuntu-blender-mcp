@@ -241,6 +241,56 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         bpy.context.view_layer.update()
         return {"updated": True, "object": _serialize_object(obj)}
 
+    if action == "create_collection":
+        name = _name(arguments)
+        object_names = arguments.get("object_names")
+        if not isinstance(object_names, list) or not 1 <= len(object_names) <= 200:
+            raise ValueError("object_names must be a list of 1 to 200 object names")
+        if any(
+            not isinstance(item, str)
+            or item != item.strip()
+            or not item
+            or len(item) > 128
+            or any(ord(char) < 32 for char in item)
+            for item in object_names
+        ):
+            raise ValueError("object_names contains an invalid object name")
+        if len(set(object_names)) != len(object_names):
+            raise ValueError("object_names must not contain duplicates")
+        if bpy.data.collections.get(name) is not None:
+            raise ValueError("A collection with that name already exists")
+        scene = bpy.context.scene
+        objects = [scene.objects.get(item) for item in object_names]
+        missing = [item for item, obj in zip(object_names, objects) if obj is None]
+        if missing:
+            raise ValueError(
+                "Objects do not exist in the current scene: " + ", ".join(missing)
+            )
+
+        # Only unlink collections belonging to this scene. Preserve links in other scenes.
+        scene_collections = set()
+
+        def gather(collection: bpy.types.Collection) -> None:
+            scene_collections.add(collection)
+            for child in collection.children:
+                gather(child)
+
+        gather(scene.collection)
+        collection = bpy.data.collections.new(name)
+        scene.collection.children.link(collection)
+        for obj in objects:
+            collection.objects.link(obj)
+            for previous in tuple(obj.users_collection):
+                if previous is not collection and previous in scene_collections:
+                    previous.objects.unlink(obj)
+        bpy.context.view_layer.update()
+        return {
+            "created": True,
+            "collection": collection.name,
+            "object_names": [obj.name for obj in objects],
+            "count": len(objects),
+        }
+
     raise ValueError("Action is not allowed")
 
 
