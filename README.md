@@ -15,10 +15,35 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_get_scene` | Enabled | Read scene, frame, renderer, camera, selection, and object count |
 | `blender_list_objects` | Enabled | List up to 200 scene objects and their transforms |
 | `blender_get_object` | Enabled | Inspect one named object |
+| `blender_turntable_start` | Enabled | Start a 360° viewport capture of a geometry object |
+| `blender_turntable_status` | Enabled | Read capture progress and errors |
+| `blender_turntable_sheet` | Enabled | Return the completed contact sheet as an MCP image |
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
 
 Supported primitives are `CUBE`, `UV_SPHERE`, `CYLINDER`, `CONE`, `TORUS`, and `PLANE`. Rotation values are radians.
+
+### 360° viewport preview
+
+With Blender open on a desktop and a 3D View visible, call `blender_turntable_start`
+with an object name and `views` of 8, 12 (default), 16, or 24. Poll
+`blender_turntable_status(job_id)` until `state` is `completed`, then call
+`blender_turntable_sheet(job_id)` to see a labeled PNG contact sheet in the MCP
+client. Failed jobs report an error in the status response. Captures expire after
+10 minutes; download the sheet before then. Only one capture can run at a time.
+The tool rotates the viewport around the selected object's bounding box; it
+does not rotate or save the model. It restores the original viewport and render
+settings after each frame. Other scene objects are hidden temporarily for each
+frame so the sheet focuses on the named object. The scene is temporarily blocked from changes by
+this bridge while capture is running. Other manual edits in Blender during a
+capture may still affect the result, so leave the scene idle until it finishes.
+
+The 3D View must remain open for capture. The bridge serves each 320 px PNG
+over its token-authenticated loopback interface; the MCP server assembles them
+into one 1280 px wide sheet. Images never go through the bridge JSON response.
+This is a turntable around the world's vertical axis, not a full spherical view;
+top and bottom views are future extensions. Verify the first capture against
+the visible Blender scene in the target VM before relying on the preview.
 
 ## Architecture
 
@@ -87,7 +112,7 @@ CI installs the package, compiles the add-on source, and runs the unit tests. A 
 ## Current limitations
 
 - Blender must remain open with the custom add-on enabled.
-- Saving, deleting, rendering, materials, modifiers, undo checkpoints, and file export are intentionally deferred.
+- Saving, deleting, final camera rendering, materials, modifiers, undo checkpoints, and file export are intentionally deferred.
 - Deployment is currently documented as a manual procedure; install and verification shell scripts are not yet present.
 - The `.mcpb` bundle mentioned by Blender's official Lab project is not used by this remote OAuth/Cloudflare architecture.
 

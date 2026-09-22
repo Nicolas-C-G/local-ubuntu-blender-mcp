@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
-
 
 MAX_REQUEST_BYTES = 65_536
 MAX_RESPONSE_BYTES = 1_048_576
@@ -20,8 +20,12 @@ ALLOWED_ACTIONS = frozenset(
         "get_object",
         "create_primitive",
         "set_transform",
+        "start_turntable",
+        "turntable_status",
     }
 )
+_JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
+MAX_IMAGE_BYTES = 2_000_000
 
 
 class BridgeError(RuntimeError):
@@ -102,3 +106,26 @@ class BlenderBridgeClient:
         if not isinstance(result, dict):
             raise BridgeError("The Blender bridge result must be a JSON object.")
         return result
+
+    def turntable_frame(self, job_id: str, index: int) -> bytes:
+        if not _JOB_ID.fullmatch(job_id) or not isinstance(index, int) or not 0 <= index < 24:
+            raise BridgeError("Invalid turntable frame request.")
+        endpoint = self.endpoint.rstrip("/")
+        if endpoint.endswith("/command"):
+            endpoint = endpoint[: -len("/command")]
+        request = Request(
+            f"{endpoint}/preview/{job_id}/{index}",
+            headers={"Authorization": f"Bearer {self.token}", "Accept": "image/png"},
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                if response.headers.get_content_type() != "image/png":
+                    raise BridgeError("Blender bridge returned a non-PNG preview.")
+                raw = response.read(MAX_IMAGE_BYTES + 1)
+        except HTTPError as exc:
+            raise BridgeError(f"Preview image unavailable (HTTP {exc.code}).") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise BridgeError("Blender bridge is unavailable.") from exc
+        if len(raw) > MAX_IMAGE_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise BridgeError("Preview image is too large or invalid.")
+        return raw

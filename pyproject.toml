@@ -13,6 +13,7 @@ authors = [{name = "Nicolás Cartes"}]
 dependencies = [
     "mcp>=2,<3",
     "PyJWT[crypto]>=2.10,<3",
+    "Pillow>=10,<13",
 ]
 
 [project.scripts]

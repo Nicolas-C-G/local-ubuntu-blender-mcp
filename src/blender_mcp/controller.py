@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import math
 import os
-from datetime import datetime, timezone
+import re
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .bridge import BlenderBridgeClient, BridgeError
+
+_JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
 PRIMITIVE_TYPES = frozenset({"CUBE", "UV_SPHERE", "CYLINDER", "CONE", "TORUS", "PLANE"})
@@ -31,7 +36,7 @@ class BlenderController:
         self.mutations_enabled = mutations_enabled
 
     @classmethod
-    def from_environment(cls) -> "BlenderController":
+    def from_environment(cls) -> BlenderController:
         token = os.environ.get("BLENDER_BRIDGE_TOKEN", "")
         bridge = BlenderBridgeClient(
             endpoint=os.getenv("BLENDER_BRIDGE_URL", "http://127.0.0.1:8765/command"),
@@ -58,7 +63,7 @@ class BlenderController:
         error: str | None = None,
     ) -> None:
         record: dict[str, Any] = {
-            "time": datetime.now(timezone.utc).isoformat(),
+            "time": datetime.now(UTC).isoformat(),
             "tool": tool,
             "arguments": arguments,
             "outcome": outcome,
@@ -128,6 +133,54 @@ class BlenderController:
 
     def get_object(self, name: str) -> dict[str, Any]:
         return self._call("get_object", {"name": self._name(name)})
+
+    def start_turntable(self, name: str, views: int = 12) -> dict[str, Any]:
+        if not isinstance(views, int) or isinstance(views, bool) or views not in {8, 12, 16, 24}:
+            raise ControlError("views must be 8, 12, 16, or 24.")
+        return self._call("start_turntable", {"name": self._name(name), "views": views})
+
+    def turntable_status(self, job_id: str) -> dict[str, Any]:
+        if not isinstance(job_id, str) or not _JOB_ID.fullmatch(job_id):
+            raise ControlError("Invalid turntable job ID.")
+        return self._call("turntable_status", {"job_id": job_id})
+
+    def turntable_sheet(self, job_id: str) -> bytes:
+        status = self.turntable_status(job_id)
+        if status.get("state") != "completed":
+            raise ControlError("Turntable is not completed; check status first.")
+        count = status.get("views")
+        if not isinstance(count, int) or count not in {8, 12, 16, 24}:
+            raise ControlError("Invalid turntable view count.")
+        from PIL import Image, ImageDraw
+
+        columns = 4
+        cell = 320
+        rows = (count + columns - 1) // columns
+        sheet = Image.new("RGB", (columns * cell, rows * (cell + 24)), "#202020")
+        draw = ImageDraw.Draw(sheet)
+        for index in range(count):
+            try:
+                frame = self.bridge.turntable_frame(job_id, index)
+                with Image.open(BytesIO(frame)) as image:
+                    image.load()
+                    if image.width > 1024 or image.height > 1024:
+                        raise ControlError("Turntable frame is too large.")
+                    thumb = image.convert("RGB")
+                    thumb.thumbnail((cell, cell))
+                    x = (index % columns) * cell + (cell - thumb.width) // 2
+                    y = (index // columns) * (cell + 24) + (cell - thumb.height) // 2
+                    sheet.paste(thumb, (x, y))
+                    draw.text(
+                        ((index % columns) * cell + 8, (index // columns) * (cell + 24) + cell + 3),
+                        f"{index * 360 // count}°",
+                        fill="white",
+                    )
+            except (BridgeError, OSError, ValueError) as exc:
+                raise ControlError("Could not retrieve a turntable frame.") from exc
+        output = BytesIO()
+        sheet.save(output, format="PNG")
+        self._audit("turntable_sheet", {"job_id": job_id}, "success")
+        return output.getvalue()
 
     def create_primitive(
         self,

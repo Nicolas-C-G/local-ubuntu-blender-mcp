@@ -4,8 +4,11 @@ import json
 import math
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+
+from PIL import Image
 
 from blender_mcp.bridge import BridgeError
 from blender_mcp.controller import BlenderController, ControlError
@@ -21,6 +24,11 @@ class FakeBridge:
         if self.error:
             raise BridgeError(self.error)
         return {"action": action, "arguments": arguments}
+
+    def turntable_frame(self, job_id: str, index: int) -> bytes:
+        buffer = BytesIO()
+        Image.new("RGB", (64, 64), (index * 10, 20, 30)).save(buffer, "PNG")
+        return buffer.getvalue()
 
 
 class BlenderControllerTests(unittest.TestCase):
@@ -103,11 +111,34 @@ class BlenderControllerTests(unittest.TestCase):
 
     def test_success_is_audited(self) -> None:
         self.controller.get_scene()
-        record = json.loads(
-            self.controller.audit_log.read_text(encoding="utf-8").splitlines()[0]
-        )
+        record = json.loads(self.controller.audit_log.read_text(encoding="utf-8").splitlines()[0])
         self.assertEqual(record["tool"], "get_scene")
         self.assertEqual(record["outcome"], "success")
+
+    def test_turntable_is_available_with_mutations_disabled(self) -> None:
+        result = self.controller.start_turntable(" Cube ", 12)
+        self.assertEqual(result["arguments"], {"name": "Cube", "views": 12})
+
+    def test_turntable_rejects_unbounded_or_invalid_requests(self) -> None:
+        for views in (0, 25, True, 12.5):
+            with self.subTest(views=views), self.assertRaises(ControlError):
+                self.controller.start_turntable("Cube", views)  # type: ignore[arg-type]
+        with self.assertRaises(ControlError):
+            self.controller.turntable_status("../../secret")
+
+    def test_completed_turntable_returns_one_contact_sheet(self) -> None:
+        original_call = self.bridge.call
+
+        def completed(action: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            if action == "turntable_status":
+                return {"state": "completed", "views": 8}
+            return original_call(action, arguments)
+
+        self.bridge.call = completed  # type: ignore[method-assign]
+        data = self.controller.turntable_sheet("a" * 32)
+        with Image.open(BytesIO(data)) as image:
+            self.assertEqual(image.size, (1280, 688))
+            self.assertEqual(image.format, "PNG")
 
 
 if __name__ == "__main__":
