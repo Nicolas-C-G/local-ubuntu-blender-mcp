@@ -219,3 +219,14 @@ class BlenderController:
             "scale": self._vector(scale, "scale", positive=True),
         }
         return self._call("set_transform", arguments)
+
+    def create_collection(self, name: str, object_names: list[str]) -> dict[str, Any]:
+        self._require_mutations()
+        if not isinstance(object_names, list) or not 1 <= len(object_names) <= 200:
+            raise ControlError("object_names must be a list of 1 to 200 object names.")
+        normalized = [self._name(item) for item in object_names]
+        if len(set(normalized)) != len(normalized):
+            raise ControlError("object_names must not contain duplicates.")
+        return self._call(
+            "create_collection", {"name": self._name(name), "object_names": normalized}
+        )
