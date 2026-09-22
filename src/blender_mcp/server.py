@@ -84,7 +84,7 @@ def blender_get_object(name: str) -> dict[str, Any]:
 
 @mcp.tool()
 def blender_turntable_start(name: str, views: int = 12) -> dict[str, Any]:
-    """Start a bounded 360-degree viewport preview of a geometry object.
+    """Start a bounded 360-degree viewport preview of a geometry object or collection.
 
     Use blender_turntable_status until completed, then blender_turntable_sheet.
     Blender must have an open 3D viewport. The scene cannot be changed during capture.
@@ -100,7 +100,7 @@ def blender_turntable_status(job_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def blender_turntable_sheet(job_id: str) -> Image:
-    """Return a completed object's 360-degree viewport contact sheet as a PNG image."""
+    """Return a completed object's or collection's 360-degree contact sheet as a PNG image."""
     return Image(data=controller.turntable_sheet(job_id), format="png")
 
 

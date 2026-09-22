@@ -98,6 +98,32 @@ def _ensure_object_mode() -> None:
             raise RuntimeError("Could not switch Blender to Object Mode")
 
 
+def _collection_in_scene(collection: bpy.types.Collection, scene: bpy.types.Scene) -> bool:
+    def contains(parent: bpy.types.Collection) -> bool:
+        return parent == collection or any(contains(child) for child in parent.children)
+
+    return contains(scene.collection)
+
+
+def _preview_objects(name: str, scene: bpy.types.Scene) -> list[bpy.types.Object]:
+    collection = bpy.data.collections.get(name)
+    if collection is not None and _collection_in_scene(collection, scene):
+        # Prefer the collection when an object shares its name. Include descendants.
+        objects = [
+            item for item in collection.all_objects
+            if scene.objects.get(item.name) is not None
+            and item.type in {"MESH", "CURVE", "SURFACE", "FONT", "META"}
+        ]
+        if not objects:
+            raise ValueError("Collection has no geometry objects in the current scene")
+        return objects
+
+    obj = scene.objects.get(name)
+    if obj is None or obj.type not in {"MESH", "CURVE", "SURFACE", "FONT", "META"}:
+        raise ValueError("Choose a geometry object or collection in the current scene")
+    return [obj]
+
+
 def _execute(command: dict[str, Any]) -> dict[str, Any]:
     action = command.get("action")
     arguments = command.get("arguments", {})
@@ -109,9 +135,7 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         if _active_preview is not None:
             raise ValueError("A turntable is already running")
         name = _name(arguments)
-        obj = bpy.context.scene.objects.get(name)
-        if obj is None or obj.type not in {"MESH", "CURVE", "SURFACE", "FONT", "META"}:
-            raise ValueError("Choose a visible geometry object in the current scene")
+        objects = _preview_objects(name, bpy.context.scene)
         views = arguments.get("views")
         if type(views) is not int or views not in {8, 12, 16, 24}:
             raise ValueError("views must be 8, 12, 16, or 24")
@@ -120,11 +144,15 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Open a Blender window with a 3D viewport first")
         if _preview_root is None:
             raise RuntimeError("Preview storage is unavailable")
-        bounds = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-        center = sum(bounds, Vector()) / len(bounds)
+        bounds = [obj.matrix_world @ Vector(corner) for obj in objects for corner in obj.bound_box]
+        if not bounds:
+            raise ValueError("Target bounds cannot be framed")
+        minimum = Vector(tuple(min(point[axis] for point in bounds) for axis in range(3)))
+        maximum = Vector(tuple(max(point[axis] for point in bounds) for axis in range(3)))
+        center = (minimum + maximum) / 2
         radius = max((point - center).length for point in bounds)
         if radius <= 0 or not math.isfinite(radius):
-            raise ValueError("Object bounds cannot be framed")
+            raise ValueError("Target bounds cannot be framed")
         job_id = uuid.uuid4().hex
         (_preview_root / job_id).mkdir()
         _previews[job_id] = {
@@ -136,6 +164,7 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
             "distance": max(2.5 * radius, 0.5),
             "area_info": area_info,
             "name": name,
+            "object_names": tuple(obj.name for obj in objects),
         }
         _active_preview = job_id
         return {"job_id": job_id, "state": "running", "views": views, "completed": 0}
@@ -156,7 +185,7 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
             "error": job.get("error"),
         }
 
-    if action in {"create_primitive", "set_transform"} and _active_preview is not None:
+    if action in {"create_primitive", "set_transform", "create_collection"} and _active_preview is not None:
         raise ValueError("Scene changes are unavailable while a turntable is running")
 
     if action == "health":
@@ -331,11 +360,11 @@ def _capture_next_frame() -> None:
     try:
         if area.type != "VIEW_3D" or _preview_root is None:
             raise RuntimeError("The 3D viewport was closed")
-        target = scene.objects.get(job["name"])
-        if target is None:
-            raise RuntimeError("The preview object was removed")
+        target_names = set(job["object_names"])
+        if any(scene.objects.get(name) is None for name in target_names):
+            raise RuntimeError("A preview object was removed")
         for obj, _ in old_visibility:
-            obj.hide_set(obj != target, view_layer=window.view_layer)
+            obj.hide_set(obj.name not in target_names, view_layer=window.view_layer)
         angle = index * 2 * math.pi / job["views"]
         # The view rotates around the world Z axis; a slight elevation reveals depth.
         view.view_perspective = "PERSP"
