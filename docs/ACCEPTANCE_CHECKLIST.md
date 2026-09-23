@@ -63,6 +63,11 @@ Perform only after the critical and read-only sections pass. Use a disposable `.
 - [ ] Create one allowlisted primitive with a unique name.
 - [ ] Create one small custom mesh with a unique name and verify its vertex, edge, and face counts.
 - [ ] Confirm an out-of-range custom-mesh index is rejected without changing the scene.
+- [ ] Add a Bevel modifier with bounded width and segment values to a disposable mesh.
+- [ ] Confirm the modifier is added to the stack but is not automatically applied.
+- [ ] Confirm an unsupported modifier type and unknown parameter are rejected.
+- [ ] Add a Boolean modifier between two disposable meshes and verify the operand reference.
+- [ ] Confirm a missing or self-referencing Boolean operand is rejected without adding a modifier.
 - [ ] Confirm the object appears in Blender and the returned result matches it.
 - [ ] Apply a bounded transform and verify it visually.
 - [ ] Unsupported primitive type is rejected.

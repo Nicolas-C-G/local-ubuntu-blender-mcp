@@ -18,6 +18,89 @@ _JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
 PRIMITIVE_TYPES = frozenset({"CUBE", "UV_SPHERE", "CYLINDER", "CONE", "TORUS", "PLANE"})
+MODIFIER_PARAMETER_SPECS: dict[str, dict[str, tuple[Any, ...]]] = {
+    "ARRAY": {
+        "count": ("integer", 1, 1_000),
+        "use_relative_offset": ("boolean",),
+        "relative_offset_displace": ("vector",),
+        "use_constant_offset": ("boolean",),
+        "constant_offset_displace": ("vector",),
+        "use_merge_vertices": ("boolean",),
+        "merge_threshold": ("number", 0.0, 100_000.0),
+    },
+    "BEVEL": {
+        "width": ("number", 0.0, 100_000.0),
+        "segments": ("integer", 1, 64),
+        "limit_method": ("enum", frozenset({"NONE", "ANGLE", "WEIGHT", "VGROUP"})),
+        "angle_limit": ("number", 0.0, math.pi),
+        "affect": ("enum", frozenset({"EDGES", "VERTICES"})),
+        "use_clamp_overlap": ("boolean",),
+    },
+    "BOOLEAN": {
+        "object": ("object_name",),
+        "operation": ("enum", frozenset({"DIFFERENCE", "INTERSECT", "UNION"})),
+        "solver": ("enum", frozenset({"EXACT", "FAST"})),
+    },
+    "DECIMATE": {
+        "decimate_type": ("enum", frozenset({"COLLAPSE", "DISSOLVE", "UNSUBDIV"})),
+        "ratio": ("number", 0.0, 1.0),
+        "iterations": ("integer", 0, 100),
+        "angle_limit": ("number", 0.0, math.pi),
+        "use_collapse_triangulate": ("boolean",),
+    },
+    "MIRROR": {
+        "use_axis": ("bool_vector",),
+        "use_clip": ("boolean",),
+        "use_mirror_merge": ("boolean",),
+        "merge_threshold": ("number", 0.0, 100_000.0),
+        "use_bisect_axis": ("bool_vector",),
+        "use_bisect_flip_axis": ("bool_vector",),
+        "mirror_object": ("object_name",),
+    },
+    "SCREW": {
+        "screw_offset": ("number", -100_000.0, 100_000.0),
+        "angle": ("number", -100.0 * math.pi, 100.0 * math.pi),
+        "steps": ("integer", 2, 1_024),
+        "render_steps": ("integer", 2, 1_024),
+        "iterations": ("integer", 1, 100),
+        "axis": ("enum", frozenset({"X", "Y", "Z"})),
+        "use_smooth_shade": ("boolean",),
+        "use_merge_vertices": ("boolean",),
+        "merge_threshold": ("number", 0.0, 100_000.0),
+    },
+    "SIMPLE_DEFORM": {
+        "deform_method": ("enum", frozenset({"BEND", "STRETCH", "TAPER", "TWIST"})),
+        "deform_axis": ("enum", frozenset({"X", "Y", "Z"})),
+        "angle": ("number", -100.0 * math.pi, 100.0 * math.pi),
+        "factor": ("number", -100.0, 100.0),
+        "limits": ("number_pair", 0.0, 1.0),
+        "lock_x": ("boolean",),
+        "lock_y": ("boolean",),
+        "lock_z": ("boolean",),
+    },
+    "SOLIDIFY": {
+        "thickness": ("number", -100_000.0, 100_000.0),
+        "offset": ("number", -1.0, 1.0),
+        "use_even_offset": ("boolean",),
+        "use_quality_normals": ("boolean",),
+    },
+    "SUBSURF": {
+        "levels": ("integer", 0, 6),
+        "render_levels": ("integer", 0, 6),
+        "subdivision_type": ("enum", frozenset({"CATMULL_CLARK", "SIMPLE"})),
+        "use_limit_surface": ("boolean",),
+    },
+    "TRIANGULATE": {
+        "quad_method": (
+            "enum",
+            frozenset({"BEAUTY", "FIXED", "FIXED_ALTERNATE", "SHORTEST_DIAGONAL"}),
+        ),
+        "ngon_method": ("enum", frozenset({"BEAUTY", "CLIP"})),
+        "min_vertices": ("integer", 4, 10_000),
+    },
+}
+MODIFIER_TYPES = frozenset(MODIFIER_PARAMETER_SPECS)
+MODIFIER_REQUIRED_PARAMETERS = {"BOOLEAN": frozenset({"object"})}
 MAX_MESH_VERTICES = 4_096
 MAX_MESH_EDGES = 8_192
 MAX_MESH_FACES = 4_096
@@ -124,6 +207,97 @@ class BlenderController:
         if positive and any(component <= 0 for component in vector):
             raise ControlError(f"{field} components must be greater than zero.")
         return vector
+
+    @classmethod
+    def _modifier_parameters(
+        cls,
+        modifier_type: str,
+        parameters: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if parameters is None:
+            parameters = {}
+        if not isinstance(parameters, dict) or len(parameters) > 16:
+            raise ControlError("parameters must be an object with at most 16 entries.")
+
+        specs = MODIFIER_PARAMETER_SPECS[modifier_type]
+        if any(not isinstance(key, str) or key not in specs for key in parameters):
+            allowed = ", ".join(sorted(specs))
+            raise ControlError(
+                f"Unsupported parameter for {modifier_type}. Allowed parameters: {allowed}."
+            )
+        missing = MODIFIER_REQUIRED_PARAMETERS.get(modifier_type, frozenset()) - parameters.keys()
+        if missing:
+            raise ControlError(
+                f"{modifier_type} requires parameter(s): {', '.join(sorted(missing))}."
+            )
+
+        normalized: dict[str, Any] = {}
+        for key, value in parameters.items():
+            spec = specs[key]
+            kind = spec[0]
+            if kind == "boolean":
+                if type(value) is not bool:
+                    raise ControlError(f"parameters.{key} must be true or false.")
+                normalized[key] = value
+            elif kind == "integer":
+                if type(value) is not int or not spec[1] <= value <= spec[2]:
+                    raise ControlError(
+                        f"parameters.{key} must be an integer between {spec[1]} and {spec[2]}."
+                    )
+                normalized[key] = value
+            elif kind == "number":
+                if type(value) not in {int, float}:
+                    raise ControlError(f"parameters.{key} must be a number.")
+                number = float(value)
+                if not math.isfinite(number) or not spec[1] <= number <= spec[2]:
+                    raise ControlError(
+                        f"parameters.{key} must be between {spec[1]} and {spec[2]}."
+                    )
+                normalized[key] = number
+            elif kind == "enum":
+                if not isinstance(value, str) or value.strip().upper() not in spec[1]:
+                    allowed = ", ".join(sorted(spec[1]))
+                    raise ControlError(f"parameters.{key} must be one of: {allowed}.")
+                normalized[key] = value.strip().upper()
+            elif kind == "vector":
+                if (
+                    not isinstance(value, list)
+                    or len(value) != 3
+                    or any(type(component) not in {int, float} for component in value)
+                ):
+                    raise ControlError(f"parameters.{key} must contain exactly three numbers.")
+                normalized[key] = cls._vector(value, f"parameters.{key}")
+            elif kind == "bool_vector":
+                if (
+                    not isinstance(value, list)
+                    or len(value) != 3
+                    or any(type(component) is not bool for component in value)
+                ):
+                    raise ControlError(f"parameters.{key} must contain exactly three booleans.")
+                if key == "use_axis" and not any(value):
+                    raise ControlError("parameters.use_axis must enable at least one axis.")
+                normalized[key] = list(value)
+            elif kind == "number_pair":
+                if (
+                    not isinstance(value, list)
+                    or len(value) != 2
+                    or any(type(component) not in {int, float} for component in value)
+                ):
+                    raise ControlError(f"parameters.{key} must contain exactly two numbers.")
+                pair = [float(component) for component in value]
+                if (
+                    not all(math.isfinite(component) for component in pair)
+                    or not spec[1] <= pair[0] <= pair[1] <= spec[2]
+                ):
+                    raise ControlError(
+                        f"parameters.{key} must be ordered between {spec[1]} and {spec[2]}."
+                    )
+                normalized[key] = pair
+            elif kind == "object_name":
+                normalized[key] = cls._name(value)
+            else:  # pragma: no cover - specs are defined in this module
+                raise ControlError("Invalid modifier parameter specification.")
+        return normalized
 
     def health(self) -> dict[str, Any]:
         return self._call("health", {})
@@ -288,6 +462,29 @@ class BlenderController:
                 "vertices": normalized_vertices,
                 "edges": normalized_edges,
                 "faces": normalized_faces,
+            },
+        )
+
+    def add_modifier(
+        self,
+        object_name: str,
+        modifier_type: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Add one allowlisted, bounded modifier to a mesh object."""
+        self._require_mutations()
+        if not isinstance(modifier_type, str):
+            raise ControlError("modifier_type must be text.")
+        normalized_type = modifier_type.strip().upper()
+        if normalized_type not in MODIFIER_TYPES:
+            allowed = ", ".join(sorted(MODIFIER_TYPES))
+            raise ControlError(f"Unsupported modifier type. Allowed values: {allowed}.")
+        return self._call(
+            "add_modifier",
+            {
+                "object_name": self._name(object_name),
+                "modifier_type": normalized_type,
+                "parameters": self._modifier_parameters(normalized_type, parameters),
             },
         )
 

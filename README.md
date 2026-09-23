@@ -20,6 +20,7 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_turntable_sheet` | Enabled | Return the completed contact sheet as an MCP image |
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
 | `blender_create_mesh` | Disabled | Create bounded custom topology from vertices, edges, and faces |
+| `blender_add_modifier` | Disabled | Add one allowlisted modifier to an existing mesh object |
 | `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
 | `blender_delete_collection` | Disabled | Delete one exact-name collection while preserving its contents |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
@@ -72,6 +73,42 @@ must be finite and within ±100,000. Duplicate undirected edges, invalid indices
 degenerate topology, and existing object names are rejected before Blender is
 changed. The operation requires mutations to be enabled and is blocked during a
 turntable capture. Save the `.blend` file in Blender to persist the result.
+
+### Modifiers
+
+`blender_add_modifier(object_name, modifier_type, parameters={})` appends one
+non-applied modifier to an existing mesh object in the current scene. Modifier
+types and enum values are case-insensitive. For example:
+
+```python
+blender_add_modifier(
+    object_name="Wing",
+    modifier_type="BEVEL",
+    parameters={"width": 0.08, "segments": 3, "limit_method": "ANGLE"},
+)
+```
+
+The first version supports these bounded parameter allowlists:
+
+| Modifier | Supported parameters |
+| --- | --- |
+| `ARRAY` | `count`, `use_relative_offset`, `relative_offset_displace`, `use_constant_offset`, `constant_offset_displace`, `use_merge_vertices`, `merge_threshold` |
+| `BEVEL` | `width`, `segments`, `limit_method`, `angle_limit`, `affect`, `use_clamp_overlap` |
+| `BOOLEAN` | `object` (required), `operation`, `solver` |
+| `DECIMATE` | `decimate_type`, `ratio`, `iterations`, `angle_limit`, `use_collapse_triangulate` |
+| `MIRROR` | `use_axis`, `use_clip`, `use_mirror_merge`, `merge_threshold`, `use_bisect_axis`, `use_bisect_flip_axis`, `mirror_object` |
+| `SCREW` | `screw_offset`, `angle`, `steps`, `render_steps`, `iterations`, `axis`, `use_smooth_shade`, `use_merge_vertices`, `merge_threshold` |
+| `SIMPLE_DEFORM` | `deform_method`, `deform_axis`, `angle`, `factor`, `limits`, `lock_x`, `lock_y`, `lock_z` |
+| `SOLIDIFY` | `thickness`, `offset`, `use_even_offset`, `use_quality_normals` |
+| `SUBSURF` | `levels`, `render_levels`, `subdivision_type`, `use_limit_surface` |
+| `TRIANGULATE` | `quad_method`, `ngon_method`, `min_vertices` |
+
+Unknown modifier types and parameter names are rejected rather than passed to
+Blender. Numeric values, counts, enum values, axes, vectors, and limits are
+bounded. `BOOLEAN.object` and `MIRROR.mirror_object` take exact object names and
+must resolve inside the current scene; self-references are rejected. The tool
+does not apply the modifier or save the file. It requires mutations to be
+enabled and is blocked during turntable capture.
 
 ### Collections
 
@@ -150,7 +187,7 @@ CI installs the package, compiles the add-on source, and runs the unit tests. A 
 ## Current limitations
 
 - Blender must remain open with the custom add-on enabled.
-- Saving, final camera rendering, materials, modifiers, undo checkpoints, orphan-data purging, and file export are intentionally deferred.
+- Saving, applying modifiers, final camera rendering, materials, undo checkpoints, orphan-data purging, and file export are intentionally deferred.
 - Deployment is currently documented as a manual procedure; install and verification shell scripts are not yet present.
 - The `.mcpb` bundle mentioned by Blender's official Lab project is not used by this remote OAuth/Cloudflare architecture.
 
