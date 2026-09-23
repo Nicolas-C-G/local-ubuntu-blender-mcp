@@ -225,6 +225,11 @@ class BlenderController:
         self._require_mutations()
         return self._call("delete_object", {"name": self._name(name)})
 
+    def delete_collection(self, name: str) -> dict[str, Any]:
+        """Delete one exact-name collection while preserving its contents."""
+        self._require_mutations()
+        return self._call("delete_collection", {"name": self._name(name)})
+
     def create_collection(self, name: str, object_names: list[str]) -> dict[str, Any]:
         self._require_mutations()
         if not isinstance(object_names, list) or not 1 <= len(object_names) <= 200:

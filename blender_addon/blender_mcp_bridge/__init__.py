@@ -190,6 +190,7 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         "set_transform",
         "create_collection",
         "delete_object",
+        "delete_collection",
     } and _active_preview is not None:
         raise ValueError("Scene changes are unavailable while a turntable is running")
 
@@ -285,6 +286,48 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         bpy.data.objects.remove(obj, do_unlink=True)
         bpy.context.view_layer.update()
         return {"deleted": True, "name": name, "type": object_type}
+
+    if action == "delete_collection":
+        name = _name(arguments)
+        collection = bpy.data.collections.get(name)
+        scene = bpy.context.scene
+        if collection is None or not _collection_in_scene(collection, scene):
+            raise ValueError("Collection does not exist in the current scene")
+        if collection == scene.collection:
+            raise ValueError("The scene root collection cannot be deleted")
+
+        objects = tuple(collection.objects)
+        children = tuple(collection.children)
+        parents = []
+
+        # A collection datablock can be linked below multiple collections or
+        # directly below multiple scenes. Preserve its direct contents at each
+        # link location before removing the datablock globally.
+        for candidate_scene in bpy.data.scenes:
+            parent = candidate_scene.collection
+            if collection in parent.children:
+                parents.append(parent)
+        for parent in bpy.data.collections:
+            if parent != collection and collection in parent.children:
+                parents.append(parent)
+
+        for parent in parents:
+            for obj in objects:
+                if obj not in parent.objects:
+                    parent.objects.link(obj)
+            for child in children:
+                if child not in parent.children:
+                    parent.children.link(child)
+            parent.children.unlink(collection)
+
+        bpy.data.collections.remove(collection, do_unlink=True)
+        bpy.context.view_layer.update()
+        return {
+            "deleted": True,
+            "name": name,
+            "preserved_object_count": len(objects),
+            "preserved_child_collection_count": len(children),
+        }
 
     if action == "create_collection":
         name = _name(arguments)

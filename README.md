@@ -20,6 +20,7 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_turntable_sheet` | Enabled | Return the completed contact sheet as an MCP image |
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
 | `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
+| `blender_delete_collection` | Disabled | Delete one exact-name collection while preserving its contents |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
 | `blender_delete_object` | Disabled | Delete one exact-name object from the open Blender file |
 
@@ -52,9 +53,11 @@ the visible Blender scene in the target VM before relying on the preview.
 
 For example, `blender_create_collection(name="RobotArm", object_names=["Cube", "RobotArm_Pedestal"])` creates a new scene collection and moves both existing objects into it. The tool accepts 1 to 200 distinct names. It checks every object before changing the scene, rejects an existing collection name, and preserves object links in other scenes. Enable mutations to use it. Save the `.blend` file in Blender to keep the change across sessions.
 
+`blender_delete_collection(name="RobotArm")` deletes the exact-name collection datablock after moving its direct objects and child collections to every location where the collection was linked. Objects and nested collections therefore remain available in the scene. The target must belong to the current scene, mutations must be enabled, and the call is blocked during a turntable capture. Save the `.blend` file only when you intend to persist the change.
+
 ### Object deletion
 
-`blender_delete_object(name="Cube")` deletes exactly one object datablock and unlinks it from every collection and scene in the open Blender file. It does not accept wildcards, delete collections, or purge the object's now-unused mesh or other data. The call requires mutations to be enabled and is blocked during a turntable capture. Back up the scene and confirm the exact object name before calling it. Save the `.blend` file only when you intend to persist the deletion.
+`blender_delete_object(name="Cube")` deletes exactly one object datablock and unlinks it from every collection and scene in the open Blender file. It does not accept wildcards or purge the object's now-unused mesh or other data. The call requires mutations to be enabled and is blocked during a turntable capture. Back up the scene and confirm the exact object name before calling it. Save the `.blend` file only when you intend to persist the deletion.
 
 ## Architecture
 
