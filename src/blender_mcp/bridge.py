@@ -24,6 +24,7 @@ ALLOWED_ACTIONS = frozenset(
         "turntable_status",
         "create_collection",
         "delete_object",
+        "delete_collection",
     }
 )
 _JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
