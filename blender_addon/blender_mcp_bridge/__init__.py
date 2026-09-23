@@ -305,18 +305,18 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         # link location before removing the datablock globally.
         for candidate_scene in bpy.data.scenes:
             parent = candidate_scene.collection
-            if collection in parent.children:
+            if parent.children.get(collection.name) is collection:
                 parents.append(parent)
         for parent in bpy.data.collections:
-            if parent != collection and collection in parent.children:
+            if parent != collection and parent.children.get(collection.name) is collection:
                 parents.append(parent)
 
         for parent in parents:
             for obj in objects:
-                if obj not in parent.objects:
+                if parent.objects.get(obj.name) is None:
                     parent.objects.link(obj)
             for child in children:
-                if child not in parent.children:
+                if parent.children.get(child.name) is None:
                     parent.children.link(child)
             parent.children.unlink(collection)
 

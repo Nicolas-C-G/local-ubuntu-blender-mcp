@@ -13,8 +13,16 @@ from unittest.mock import patch
 
 
 class FakeLinks(list[object]):
+    def get(self, name: str) -> object | None:
+        return next((item for item in self if getattr(item, "name", None) == name), None)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            raise TypeError("Blender collection membership expects a name")
+        return self.get(key) is not None
+
     def link(self, item: object) -> None:
-        if item in self:
+        if self.get(getattr(item, "name", "")) is not None:
             raise AssertionError("item is already linked")
         self.append(item)
 
@@ -172,11 +180,29 @@ class AddonPreviewTests(unittest.TestCase):
             "preserved_child_collection_count": 1,
         })
         self.assertNotIn("RobotArm", self.data_collections)
-        self.assertNotIn(self.assembly, self.scene_root.children)
-        self.assertIn(self.pedestal, self.scene_root.objects)
-        self.assertIn(self.light, self.scene_root.objects)
-        self.assertIn(self.nested, self.scene_root.children)
-        self.assertIn(self.grip, self.nested.objects)
+        self.assertNotIn(self.assembly, list(self.scene_root.children))
+        self.assertIn(self.pedestal, list(self.scene_root.objects))
+        self.assertIn(self.light, list(self.scene_root.objects))
+        self.assertIn(self.nested, list(self.scene_root.children))
+        self.assertIn(self.grip, list(self.nested.objects))
+
+    def test_delete_empty_nested_collection_uses_blender_name_lookup(self) -> None:
+        empty = FakeCollection("VTOL_Drone")
+        self.assembly.children.append(empty)
+        self.data_collections["VTOL_Drone"] = empty
+
+        result = self.addon._execute({
+            "action": "delete_collection", "arguments": {"name": "VTOL_Drone"}
+        })
+
+        self.assertEqual(result, {
+            "deleted": True,
+            "name": "VTOL_Drone",
+            "preserved_object_count": 0,
+            "preserved_child_collection_count": 0,
+        })
+        self.assertNotIn("VTOL_Drone", self.data_collections)
+        self.assertNotIn(empty, list(self.assembly.children))
 
     def test_delete_collection_rejects_collection_outside_current_scene(self) -> None:
         other = FakeCollection("Other")
