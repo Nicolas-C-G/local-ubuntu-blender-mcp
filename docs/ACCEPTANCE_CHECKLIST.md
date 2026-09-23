@@ -67,6 +67,10 @@ Perform only after the critical and read-only sections pass. Use a disposable `.
 - [ ] Non-finite or out-of-range transforms are rejected.
 - [ ] Non-positive scale is rejected.
 - [ ] Duplicate object name is rejected.
+- [ ] Create a uniquely named disposable object, confirm its exact name, and delete it.
+- [ ] The deleted object is absent while similarly named objects remain unchanged.
+- [ ] Deleting an unknown object returns a safe error.
+- [ ] Object deletion is rejected while mutations are disabled.
 - [ ] Each accepted call appears in the audit log.
 - [ ] Disable mutations and restart the service immediately after testing.
 - [ ] Confirm a mutation is rejected again.

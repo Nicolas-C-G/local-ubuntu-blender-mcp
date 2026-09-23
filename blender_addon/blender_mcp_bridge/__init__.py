@@ -185,7 +185,12 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
             "error": job.get("error"),
         }
 
-    if action in {"create_primitive", "set_transform", "create_collection"} and _active_preview is not None:
+    if action in {
+        "create_primitive",
+        "set_transform",
+        "create_collection",
+        "delete_object",
+    } and _active_preview is not None:
         raise ValueError("Scene changes are unavailable while a turntable is running")
 
     if action == "health":
@@ -269,6 +274,17 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         obj.scale = _vector(arguments, "scale", positive=True)
         bpy.context.view_layer.update()
         return {"updated": True, "object": _serialize_object(obj)}
+
+    if action == "delete_object":
+        name = _name(arguments)
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            raise ValueError("Object does not exist")
+        object_type = obj.type
+        _ensure_object_mode()
+        bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.context.view_layer.update()
+        return {"deleted": True, "name": name, "type": object_type}
 
     if action == "create_collection":
         name = _name(arguments)
