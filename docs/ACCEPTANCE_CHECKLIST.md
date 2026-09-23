@@ -61,6 +61,8 @@ Perform only after the critical and read-only sections pass. Use a disposable `.
 - [ ] Back up or checkpoint the scene.
 - [ ] Explicitly enable mutations and restart the MCP service.
 - [ ] Create one allowlisted primitive with a unique name.
+- [ ] Create one small custom mesh with a unique name and verify its vertex, edge, and face counts.
+- [ ] Confirm an out-of-range custom-mesh index is rejected without changing the scene.
 - [ ] Confirm the object appears in Blender and the returned result matches it.
 - [ ] Apply a bounded transform and verify it visually.
 - [ ] Unsupported primitive type is rejected.

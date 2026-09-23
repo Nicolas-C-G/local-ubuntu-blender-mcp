@@ -18,6 +18,11 @@ _JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
 PRIMITIVE_TYPES = frozenset({"CUBE", "UV_SPHERE", "CYLINDER", "CONE", "TORUS", "PLANE"})
+MAX_MESH_VERTICES = 4_096
+MAX_MESH_EDGES = 8_192
+MAX_MESH_FACES = 4_096
+MAX_FACE_VERTICES = 256
+MAX_FACE_INDEX_REFERENCES = 32_768
 
 
 class ControlError(RuntimeError):
@@ -110,7 +115,7 @@ class BlenderController:
             raise ControlError(f"{field} must contain exactly three numbers.")
         try:
             vector = [float(component) for component in value]
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ControlError(f"{field} must contain exactly three numbers.") from exc
         if len(vector) != 3 or not all(math.isfinite(component) for component in vector):
             raise ControlError(f"{field} must contain exactly three finite numbers.")
@@ -203,6 +208,88 @@ class BlenderController:
             "scale": self._vector(scale, "scale", positive=True),
         }
         return self._call("create_primitive", arguments)
+
+    def create_mesh(
+        self,
+        vertices: list[list[float]],
+        edges: list[list[int]],
+        faces: list[list[int]],
+        name: str = "CustomMesh",
+    ) -> dict[str, Any]:
+        """Create one bounded mesh from explicit zero-based topology."""
+        self._require_mutations()
+        if not isinstance(vertices, list) or not 1 <= len(vertices) <= MAX_MESH_VERTICES:
+            raise ControlError(
+                f"vertices must be a list containing 1 to {MAX_MESH_VERTICES} vertices."
+            )
+
+        normalized_vertices: list[list[float]] = []
+        for index, vertex in enumerate(vertices):
+            if (
+                not isinstance(vertex, list)
+                or len(vertex) != 3
+                or any(isinstance(component, bool) for component in vertex)
+            ):
+                raise ControlError(f"vertices[{index}] must contain exactly three numbers.")
+            normalized_vertices.append(self._vector(vertex, f"vertices[{index}]"))
+
+        if not isinstance(edges, list) or len(edges) > MAX_MESH_EDGES:
+            raise ControlError(f"edges must be a list containing at most {MAX_MESH_EDGES} edges.")
+        normalized_edges: list[list[int]] = []
+        seen_edges: set[tuple[int, int]] = set()
+        for index, edge in enumerate(edges):
+            if not isinstance(edge, list) or len(edge) != 2:
+                raise ControlError(f"edges[{index}] must contain exactly two vertex indices.")
+            if any(type(vertex_index) is not int for vertex_index in edge):
+                raise ControlError(f"edges[{index}] must contain integer vertex indices.")
+            if any(
+                vertex_index < 0 or vertex_index >= len(normalized_vertices)
+                for vertex_index in edge
+            ):
+                raise ControlError(f"edges[{index}] contains an out-of-range vertex index.")
+            if edge[0] == edge[1]:
+                raise ControlError(f"edges[{index}] must reference two distinct vertices.")
+            canonical = tuple(sorted(edge))
+            if canonical in seen_edges:
+                raise ControlError("edges must not contain duplicates.")
+            seen_edges.add(canonical)
+            normalized_edges.append(list(edge))
+
+        if not isinstance(faces, list) or len(faces) > MAX_MESH_FACES:
+            raise ControlError(f"faces must be a list containing at most {MAX_MESH_FACES} faces.")
+        normalized_faces: list[list[int]] = []
+        face_index_references = 0
+        for index, face in enumerate(faces):
+            if not isinstance(face, list) or not 3 <= len(face) <= MAX_FACE_VERTICES:
+                raise ControlError(
+                    f"faces[{index}] must contain 3 to {MAX_FACE_VERTICES} vertex indices."
+                )
+            if any(type(vertex_index) is not int for vertex_index in face):
+                raise ControlError(f"faces[{index}] must contain integer vertex indices.")
+            if any(
+                vertex_index < 0 or vertex_index >= len(normalized_vertices)
+                for vertex_index in face
+            ):
+                raise ControlError(f"faces[{index}] contains an out-of-range vertex index.")
+            if len(set(face)) != len(face):
+                raise ControlError(f"faces[{index}] must not repeat vertex indices.")
+            face_index_references += len(face)
+            if face_index_references > MAX_FACE_INDEX_REFERENCES:
+                raise ControlError(
+                    "faces must contain at most "
+                    f"{MAX_FACE_INDEX_REFERENCES} vertex-index references."
+                )
+            normalized_faces.append(list(face))
+
+        return self._call(
+            "create_mesh",
+            {
+                "name": self._name(name),
+                "vertices": normalized_vertices,
+                "edges": normalized_edges,
+                "faces": normalized_faces,
+            },
+        )
 
     def set_transform(
         self,

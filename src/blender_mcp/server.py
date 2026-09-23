@@ -127,6 +127,21 @@ def blender_create_primitive(
 
 
 @mcp.tool()
+def blender_create_mesh(
+    vertices: list[list[float]],
+    edges: list[list[int]],
+    faces: list[list[int]],
+    name: str = "CustomMesh",
+) -> dict[str, Any]:
+    """Create a mesh from explicit vertices, edges, and faces.
+
+    Indices are zero-based. Empty edge and face lists are allowed. The optional
+    name defaults to CustomMesh. Requires mutations to be enabled.
+    """
+    return controller.create_mesh(vertices, edges, faces, name)
+
+
+@mcp.tool()
 def blender_set_transform(
     name: str,
     location: list[float],

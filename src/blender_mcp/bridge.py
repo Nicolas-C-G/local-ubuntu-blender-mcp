@@ -19,6 +19,7 @@ ALLOWED_ACTIONS = frozenset(
         "list_objects",
         "get_object",
         "create_primitive",
+        "create_mesh",
         "set_transform",
         "start_turntable",
         "turntable_status",

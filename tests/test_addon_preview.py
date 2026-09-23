@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import sys
 import tempfile
 import types
 import unittest
-import math
 from pathlib import Path
 from unittest.mock import patch
 
@@ -42,18 +42,73 @@ class FakeCollection:
 
 
 class FakeObject:
-    def __init__(self, name: str, object_type: str = "MESH", x: float = 0) -> None:
+    def __init__(
+        self,
+        name: str,
+        object_type: str = "MESH",
+        x: float = 0,
+        data: object | None = None,
+    ) -> None:
         self.name = name
         self.type = object_type
+        self.data = data
+        self.location = [0.0, 0.0, 0.0]
+        self.rotation_euler = [0.0, 0.0, 0.0]
+        self.rotation_mode = "XYZ"
+        self.scale = [1.0, 1.0, 1.0]
+        self.mode = "OBJECT"
         self.matrix_world = FakeMatrix(x)
         self.bound_box = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
 
+    def hide_get(self, *, view_layer: object | None = None) -> bool:
+        return False
+
+    def select_get(self) -> bool:
+        return False
+
 
 class FakeObjects(dict[str, FakeObject]):
+    def new(self, name: str, mesh: object) -> FakeObject:
+        obj = FakeObject(name, data=mesh)
+        self[name] = obj
+        return obj
+
     def remove(self, obj: FakeObject, *, do_unlink: bool = False) -> None:
         if not do_unlink:
             raise AssertionError("delete_object must unlink the object")
         del self[obj.name]
+
+
+class FakeMesh:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.vertices: list[list[float]] = []
+        self.edges: list[list[int]] = []
+        self.faces: list[list[int]] = []
+        self.updated = False
+
+    def from_pydata(
+        self,
+        vertices: list[list[float]],
+        edges: list[list[int]],
+        faces: list[list[int]],
+    ) -> None:
+        self.vertices = vertices
+        self.edges = edges
+        self.faces = faces
+
+    def update(self) -> None:
+        self.updated = True
+
+
+class FakeMeshes(dict[str, FakeMesh]):
+    def new(self, name: str) -> FakeMesh:
+        mesh = FakeMesh(name)
+        self[name] = mesh
+        return mesh
+
+    def remove(self, mesh: FakeMesh) -> None:
+        del self[mesh.name]
 
 
 class FakeCollections(dict[str, FakeCollection]):
@@ -74,10 +129,10 @@ class FakeVector:
         return self.values[index]
 
     def __add__(self, other: FakeVector) -> FakeVector:
-        return FakeVector(tuple(a + b for a, b in zip(self.values, other.values)))
+        return FakeVector(tuple(a + b for a, b in zip(self.values, other.values, strict=True)))
 
     def __sub__(self, other: FakeVector) -> FakeVector:
-        return FakeVector(tuple(a - b for a, b in zip(self.values, other.values)))
+        return FakeVector(tuple(a - b for a, b in zip(self.values, other.values, strict=True)))
 
     def __truediv__(self, number: float) -> FakeVector:
         return FakeVector(tuple(value / number for value in self.values))
@@ -115,9 +170,11 @@ class AddonPreviewTests(unittest.TestCase):
             obj.name: obj for obj in (self.pedestal, self.grip, self.light)
         })
         self.data_collections = FakeCollections({"RobotArm": self.assembly})
+        self.data_meshes = FakeMeshes()
         bpy.data = types.SimpleNamespace(
             collections=self.data_collections,
             objects=self.data_objects,
+            meshes=self.data_meshes,
             scenes=[self.scene],
         )
         mathutils = types.ModuleType("mathutils")
@@ -165,9 +222,52 @@ class AddonPreviewTests(unittest.TestCase):
 
     def test_collection_mutations_are_blocked_during_preview(self) -> None:
         self.addon._active_preview = "a" * 32
-        for action in ("create_collection", "delete_collection"):
+        for action in ("create_collection", "create_mesh", "delete_collection"):
             with self.subTest(action=action), self.assertRaisesRegex(ValueError, "unavailable"):
                 self.addon._execute({"action": action, "arguments": {}})
+
+    def test_create_mesh_builds_explicit_topology(self) -> None:
+        result = self.addon._execute({
+            "action": "create_mesh",
+            "arguments": {
+                "name": "Wing",
+                "vertices": [[0, 0, 0], [2, 0, 0], [0, 1, 0]],
+                "edges": [[0, 1]],
+                "faces": [[0, 1, 2]],
+            },
+        })
+        self.assertTrue(result["created"])
+        self.assertEqual(result["object"]["name"], "Wing")
+        self.assertEqual(result["vertex_count"], 3)
+        self.assertEqual(result["edge_count"], 1)
+        self.assertEqual(result["face_count"], 1)
+        self.assertIn("Wing", self.data_objects)
+        self.assertIn(self.data_objects["Wing"], list(self.scene_root.objects))
+        mesh = self.data_meshes["Wing"]
+        self.assertEqual(mesh.faces, [[0, 1, 2]])
+        self.assertTrue(mesh.updated)
+
+    def test_create_mesh_rejects_duplicate_name_and_invalid_indices(self) -> None:
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.addon._execute({
+                "action": "create_mesh",
+                "arguments": {
+                    "name": "Grip",
+                    "vertices": [[0, 0, 0]],
+                    "edges": [],
+                    "faces": [],
+                },
+            })
+        with self.assertRaisesRegex(ValueError, "out-of-range"):
+            self.addon._execute({
+                "action": "create_mesh",
+                "arguments": {
+                    "name": "InvalidWing",
+                    "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                    "edges": [],
+                    "faces": [[0, 1, 3]],
+                },
+            })
 
     def test_delete_collection_preserves_objects_and_child_collections(self) -> None:
         result = self.addon._execute({

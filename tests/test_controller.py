@@ -78,6 +78,43 @@ class BlenderControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlError, "Unsupported"):
             self.controller.create_primitive("MONKEY", "Suzanne")
 
+    def test_create_mesh_requires_mutation_gate(self) -> None:
+        with self.assertRaisesRegex(ControlError, "disabled"):
+            self.controller.create_mesh([[0, 0, 0]], [], [])
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_create_mesh_validates_normalizes_and_forwards_topology(self) -> None:
+        self.controller.mutations_enabled = True
+        result = self.controller.create_mesh(
+            [[0, 0, 0], [2, 0, 0], [0, 1, 0]],
+            [[0, 1], [1, 2]],
+            [[0, 1, 2]],
+            " Wing ",
+        )
+        self.assertEqual(result["action"], "create_mesh")
+        self.assertEqual(result["arguments"], {
+            "name": "Wing",
+            "vertices": [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            "edges": [[0, 1], [1, 2]],
+            "faces": [[0, 1, 2]],
+        })
+
+    def test_create_mesh_rejects_invalid_topology(self) -> None:
+        self.controller.mutations_enabled = True
+        invalid_topologies = (
+            ([], [], []),
+            ([[0, 0, math.nan]], [], []),
+            ([[0, 0, 0]], [[0, 1]], []),
+            ([[0, 0, 0], [1, 0, 0]], [[0, 1], [1, 0]], []),
+            ([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [], [[0, 1, 1]]),
+            ([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [], [[0, 1, True]]),
+        )
+        for vertices, edges, faces in invalid_topologies:
+            with self.subTest(vertices=vertices, edges=edges, faces=faces):
+                with self.assertRaises(ControlError):
+                    self.controller.create_mesh(vertices, edges, faces)
+        self.assertEqual(self.bridge.calls, [])
+
     def test_non_finite_transform_is_rejected(self) -> None:
         self.controller.mutations_enabled = True
         with self.assertRaisesRegex(ControlError, "finite"):
