@@ -75,6 +75,10 @@ class BlenderBridgeClientTests(unittest.TestCase):
         result = self.client.call("delete_object", {"name": "Cube"})
         self.assertEqual(result["received"], "delete_object")
 
+    def test_delete_collection_action_is_allowlisted(self) -> None:
+        result = self.client.call("delete_collection", {"name": "RobotArm"})
+        self.assertEqual(result["received"], "delete_collection")
+
     def test_action_allowlist_blocks_unknown_commands(self) -> None:
         with self.assertRaisesRegex(BridgeError, "not allowed"):
             self.client.call("execute_python", {"code": "print('unsafe')"})

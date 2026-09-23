@@ -151,6 +151,17 @@ def blender_delete_object(name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def blender_delete_collection(name: str) -> dict[str, Any]:
+    """Delete one exact-name collection while preserving its contents.
+
+    Requires mutations enabled. The collection must belong to the current
+    scene. Its direct objects and child collections are moved to each parent
+    before the collection datablock is removed.
+    """
+    return controller.delete_collection(name)
+
+
+@mcp.tool()
 def blender_create_collection(name: str, object_names: list[str]) -> dict[str, Any]:
     """Create a collection in the current scene and move the named objects into it.
 
