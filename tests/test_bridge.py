@@ -71,6 +71,15 @@ class BlenderBridgeClientTests(unittest.TestCase):
         })
         self.assertEqual(result["received"], "create_collection")
 
+    def test_create_mesh_action_is_allowlisted(self) -> None:
+        result = self.client.call("create_mesh", {
+            "name": "Wing",
+            "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+            "edges": [],
+            "faces": [[0, 1, 2]],
+        })
+        self.assertEqual(result["received"], "create_mesh")
+
     def test_delete_object_action_is_allowlisted(self) -> None:
         result = self.client.call("delete_object", {"name": "Cube"})
         self.assertEqual(result["received"], "delete_object")

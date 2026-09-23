@@ -38,12 +38,23 @@ The current implementation:
 - checks finite transform components and numeric bounds;
 - requires positive scales;
 - allows only enumerated primitive types;
+- bounds custom-mesh topology and validates every coordinate and vertex index;
 - permits deletion of only one exact-name object per call, with no wildcard or bulk mode;
 - queues Blender API work onto the main thread.
 
 ### Object-deletion policy
 
 `blender_delete_object` is intentionally narrow but destructive. It is protected by the same server-side mutation gate and audit trail as other writes, accepts one validated object name, and is rejected while a turntable capture is active. The bridge deletes the object datablock and unlinks it from all collections and scenes in the open Blender file. It does not delete collections, purge orphaned object data, save the file, or expose a bulk-delete mode. Operators must use a disposable file or checkpoint, verify the exact name, and supervise the call before saving the scene.
+
+### Custom-mesh policy
+
+`blender_create_mesh` accepts data rather than executable code. Both the MCP
+controller and Blender bridge independently enforce bounded vertex, edge, face,
+and index-reference counts; finite coordinate limits; zero-based index ranges;
+and non-degenerate edge and face definitions. The bridge creates the mesh only
+through Blender's `from_pydata` API and removes partially created datablocks if
+creation fails. The operation remains subject to the mutation gate, audit trail,
+request-size limit, duplicate-name check, and turntable mutation lock.
 
 ## Secret handling
 

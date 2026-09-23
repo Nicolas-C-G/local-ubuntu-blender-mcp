@@ -31,6 +31,11 @@ bl_info = {
 }
 
 _MAX_BODY_BYTES = 65_536
+_MAX_MESH_VERTICES = 4_096
+_MAX_MESH_EDGES = 8_192
+_MAX_MESH_FACES = 4_096
+_MAX_FACE_VERTICES = 256
+_MAX_FACE_INDEX_REFERENCES = 32_768
 
 
 @dataclass
@@ -75,6 +80,78 @@ def _name(arguments: dict[str, Any]) -> str:
     if not value or len(value) > 128 or any(ord(character) < 32 for character in value):
         raise ValueError("name must contain 1 to 128 printable characters")
     return value
+
+
+def _mesh_topology(
+    arguments: dict[str, Any],
+) -> tuple[list[list[float]], list[list[int]], list[list[int]]]:
+    vertices = arguments.get("vertices")
+    if not isinstance(vertices, list) or not 1 <= len(vertices) <= _MAX_MESH_VERTICES:
+        raise ValueError(
+            f"vertices must be a list containing 1 to {_MAX_MESH_VERTICES} vertices"
+        )
+    normalized_vertices: list[list[float]] = []
+    for index, vertex in enumerate(vertices):
+        if (
+            not isinstance(vertex, list)
+            or len(vertex) != 3
+            or any(type(component) not in {int, float} for component in vertex)
+        ):
+            raise ValueError(f"vertices[{index}] must contain exactly three numbers")
+        try:
+            normalized = [float(component) for component in vertex]
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"vertices[{index}] must contain exactly three numbers") from exc
+        if not all(math.isfinite(component) for component in normalized):
+            raise ValueError(f"vertices[{index}] must contain finite numbers")
+        if any(abs(component) > 100_000 for component in normalized):
+            raise ValueError(f"vertices[{index}] components exceed the allowed range")
+        normalized_vertices.append(normalized)
+
+    edges = arguments.get("edges")
+    if not isinstance(edges, list) or len(edges) > _MAX_MESH_EDGES:
+        raise ValueError(f"edges must be a list containing at most {_MAX_MESH_EDGES} edges")
+    normalized_edges: list[list[int]] = []
+    seen_edges: set[tuple[int, int]] = set()
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, list) or len(edge) != 2:
+            raise ValueError(f"edges[{index}] must contain exactly two vertex indices")
+        if any(type(vertex_index) is not int for vertex_index in edge):
+            raise ValueError(f"edges[{index}] must contain integer vertex indices")
+        if any(vertex_index < 0 or vertex_index >= len(vertices) for vertex_index in edge):
+            raise ValueError(f"edges[{index}] contains an out-of-range vertex index")
+        if edge[0] == edge[1]:
+            raise ValueError(f"edges[{index}] must reference two distinct vertices")
+        canonical = tuple(sorted(edge))
+        if canonical in seen_edges:
+            raise ValueError("edges must not contain duplicates")
+        seen_edges.add(canonical)
+        normalized_edges.append(list(edge))
+
+    faces = arguments.get("faces")
+    if not isinstance(faces, list) or len(faces) > _MAX_MESH_FACES:
+        raise ValueError(f"faces must be a list containing at most {_MAX_MESH_FACES} faces")
+    normalized_faces: list[list[int]] = []
+    face_index_references = 0
+    for index, face in enumerate(faces):
+        if not isinstance(face, list) or not 3 <= len(face) <= _MAX_FACE_VERTICES:
+            raise ValueError(
+                f"faces[{index}] must contain 3 to {_MAX_FACE_VERTICES} vertex indices"
+            )
+        if any(type(vertex_index) is not int for vertex_index in face):
+            raise ValueError(f"faces[{index}] must contain integer vertex indices")
+        if any(vertex_index < 0 or vertex_index >= len(vertices) for vertex_index in face):
+            raise ValueError(f"faces[{index}] contains an out-of-range vertex index")
+        if len(set(face)) != len(face):
+            raise ValueError(f"faces[{index}] must not repeat vertex indices")
+        face_index_references += len(face)
+        if face_index_references > _MAX_FACE_INDEX_REFERENCES:
+            raise ValueError(
+                f"faces must contain at most {_MAX_FACE_INDEX_REFERENCES} vertex-index references"
+            )
+        normalized_faces.append(list(face))
+
+    return normalized_vertices, normalized_edges, normalized_faces
 
 
 def _serialize_object(obj: bpy.types.Object) -> dict[str, Any]:
@@ -187,6 +264,7 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
 
     if action in {
         "create_primitive",
+        "create_mesh",
         "set_transform",
         "create_collection",
         "delete_object",
@@ -264,6 +342,35 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         obj.scale = scale
         bpy.context.view_layer.update()
         return {"created": True, "object": _serialize_object(obj)}
+
+    if action == "create_mesh":
+        name = _name(arguments)
+        if bpy.data.objects.get(name) is not None:
+            raise ValueError("An object with that name already exists")
+        vertices, edges, faces = _mesh_topology(arguments)
+        _ensure_object_mode()
+        mesh = None
+        obj = None
+        try:
+            mesh = bpy.data.meshes.new(name)
+            mesh.from_pydata(vertices, edges, faces)
+            mesh.update()
+            obj = bpy.data.objects.new(name, mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            bpy.context.view_layer.update()
+        except Exception:
+            if obj is not None:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh is not None:
+                bpy.data.meshes.remove(mesh)
+            raise
+        return {
+            "created": True,
+            "object": _serialize_object(obj),
+            "vertex_count": len(vertices),
+            "edge_count": len(edges),
+            "face_count": len(faces),
+        }
 
     if action == "set_transform":
         name = _name(arguments)
@@ -349,7 +456,9 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("A collection with that name already exists")
         scene = bpy.context.scene
         objects = [scene.objects.get(item) for item in object_names]
-        missing = [item for item, obj in zip(object_names, objects) if obj is None]
+        missing = [
+            item for item, obj in zip(object_names, objects, strict=True) if obj is None
+        ]
         if missing:
             raise ValueError(
                 "Objects do not exist in the current scene: " + ", ".join(missing)

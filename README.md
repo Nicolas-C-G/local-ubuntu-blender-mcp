@@ -19,6 +19,7 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_turntable_status` | Enabled | Read capture progress and errors |
 | `blender_turntable_sheet` | Enabled | Return the completed contact sheet as an MCP image |
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
+| `blender_create_mesh` | Disabled | Create bounded custom topology from vertices, edges, and faces |
 | `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
 | `blender_delete_collection` | Disabled | Delete one exact-name collection while preserving its contents |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
@@ -48,6 +49,29 @@ into one 1280 px wide sheet. Images never go through the bridge JSON response.
 This is a turntable around the world's vertical axis, not a full spherical view;
 top and bottom views are future extensions. Verify the first capture against
 the visible Blender scene in the target VM before relying on the preview.
+
+### Custom topology
+
+`blender_create_mesh(vertices, edges, faces)` creates an object named
+`CustomMesh` from zero-based vertex indices. Pass the optional `name` argument
+to create a specifically named object. For example:
+
+```python
+blender_create_mesh(
+    vertices=[[0, 0, 0], [3, 0, 0], [1, 1.5, 0], [0, 1, 0]],
+    edges=[],
+    faces=[[0, 1, 2, 3]],
+    name="Wing",
+)
+```
+
+Empty edge and face lists are allowed. Each edge needs two distinct indices;
+each face needs 3 to 256 distinct indices. The tool accepts at most 4,096
+vertices, 8,192 edges, 4,096 faces, and 32,768 face-index references. Coordinates
+must be finite and within ±100,000. Duplicate undirected edges, invalid indices,
+degenerate topology, and existing object names are rejected before Blender is
+changed. The operation requires mutations to be enabled and is blocked during a
+turntable capture. Save the `.blend` file in Blender to persist the result.
 
 ### Collections
 
