@@ -141,6 +141,16 @@ def blender_set_transform(
 
 
 @mcp.tool()
+def blender_delete_object(name: str) -> dict[str, Any]:
+    """Permanently delete one exact-name object when mutations are enabled.
+
+    The object is unlinked from every collection and scene in the current
+    Blender file. This tool does not delete collections or purge orphaned data.
+    """
+    return controller.delete_object(name)
+
+
+@mcp.tool()
 def blender_create_collection(name: str, object_names: list[str]) -> dict[str, Any]:
     """Create a collection in the current scene and move the named objects into it.
 

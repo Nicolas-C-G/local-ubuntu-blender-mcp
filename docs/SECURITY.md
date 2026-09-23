@@ -38,7 +38,12 @@ The current implementation:
 - checks finite transform components and numeric bounds;
 - requires positive scales;
 - allows only enumerated primitive types;
+- permits deletion of only one exact-name object per call, with no wildcard or bulk mode;
 - queues Blender API work onto the main thread.
+
+### Object-deletion policy
+
+`blender_delete_object` is intentionally narrow but destructive. It is protected by the same server-side mutation gate and audit trail as other writes, accepts one validated object name, and is rejected while a turntable capture is active. The bridge deletes the object datablock and unlinks it from all collections and scenes in the open Blender file. It does not delete collections, purge orphaned object data, save the file, or expose a bulk-delete mode. Operators must use a disposable file or checkpoint, verify the exact name, and supervise the call before saving the scene.
 
 ## Secret handling
 
@@ -88,7 +93,7 @@ Before adding a tool:
 7. Add audit coverage and safe error behavior.
 8. Update this threat model and acceptance checklist.
 
-Operations such as delete, save, overwrite, render, export, import, and open-file require explicit path, overwrite, resource, and confirmation policies before implementation.
+Operations such as save, overwrite, render, export, import, open-file, bulk delete, and orphan-data purge require explicit path, overwrite, resource, and confirmation policies before implementation.
 
 ## Incident response
 

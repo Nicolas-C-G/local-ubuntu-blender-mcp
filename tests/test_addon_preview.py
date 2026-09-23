@@ -31,6 +31,13 @@ class FakeObject:
         self.bound_box = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
 
 
+class FakeObjects(dict[str, FakeObject]):
+    def remove(self, obj: FakeObject, *, do_unlink: bool = False) -> None:
+        if not do_unlink:
+            raise AssertionError("delete_object must unlink the object")
+        del self[obj.name]
+
+
 class FakeVector:
     def __init__(self, values: tuple[float, ...]) -> None:
         self.values = values
@@ -76,7 +83,12 @@ class AddonPreviewTests(unittest.TestCase):
         )
         bpy = types.ModuleType("bpy")
         bpy.types = types.SimpleNamespace(Object=FakeObject, Collection=FakeCollection)
-        bpy.data = types.SimpleNamespace(collections={"RobotArm": self.assembly})
+        self.data_objects = FakeObjects({
+            obj.name: obj for obj in (self.pedestal, self.grip, self.light)
+        })
+        bpy.data = types.SimpleNamespace(
+            collections={"RobotArm": self.assembly}, objects=self.data_objects
+        )
         mathutils = types.ModuleType("mathutils")
         mathutils.Vector = FakeVector
         mathutils.Quaternion = object
@@ -88,7 +100,12 @@ class AddonPreviewTests(unittest.TestCase):
                                       spec.name: module}):
             spec.loader.exec_module(module)
         self.addon = module
-        bpy.context = types.SimpleNamespace(scene=self.scene)
+        bpy.context = types.SimpleNamespace(
+            scene=self.scene,
+            view_layer=types.SimpleNamespace(
+                objects=types.SimpleNamespace(active=None), update=lambda: None
+            ),
+        )
 
     def test_collection_includes_nested_geometry_but_not_lights(self) -> None:
         objects = self.addon._preview_objects("RobotArm", self.scene)
@@ -119,6 +136,17 @@ class AddonPreviewTests(unittest.TestCase):
         self.addon._active_preview = "a" * 32
         with self.assertRaisesRegex(ValueError, "unavailable"):
             self.addon._execute({"action": "create_collection", "arguments": {}})
+
+    def test_delete_object_removes_exact_object_and_returns_identity(self) -> None:
+        result = self.addon._execute({
+            "action": "delete_object", "arguments": {"name": "Grip"}
+        })
+        self.assertEqual(result, {"deleted": True, "name": "Grip", "type": "MESH"})
+        self.assertNotIn("Grip", self.data_objects)
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            self.addon._execute({
+                "action": "delete_object", "arguments": {"name": "Missing"}
+            })
 
     def test_turntable_frames_combined_collection_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -103,6 +103,20 @@ class BlenderControllerTests(unittest.TestCase):
             self.controller.create_collection("RobotArm", ["Cube"])
         self.assertEqual(self.bridge.calls, [])
 
+    def test_delete_object_requires_mutation_gate(self) -> None:
+        with self.assertRaisesRegex(ControlError, "disabled"):
+            self.controller.delete_object("Cube")
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_delete_object_validates_and_forwards_name(self) -> None:
+        self.controller.mutations_enabled = True
+        result = self.controller.delete_object(" Cube ")
+        self.assertEqual(result["action"], "delete_object")
+        self.assertEqual(result["arguments"], {"name": "Cube"})
+        with self.assertRaises(ControlError):
+            self.controller.delete_object("\n")
+        self.assertEqual(len(self.bridge.calls), 1)
+
     def test_create_collection_validates_and_forwards_names(self) -> None:
         self.controller.mutations_enabled = True
         result = self.controller.create_collection(" RobotArm ", [" Cube ", "Shoulder"])

@@ -21,6 +21,7 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
 | `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
+| `blender_delete_object` | Disabled | Delete one exact-name object from the open Blender file |
 
 Supported primitives are `CUBE`, `UV_SPHERE`, `CYLINDER`, `CONE`, `TORUS`, and `PLANE`. Rotation values are radians.
 
@@ -50,6 +51,10 @@ the visible Blender scene in the target VM before relying on the preview.
 ### Collections
 
 For example, `blender_create_collection(name="RobotArm", object_names=["Cube", "RobotArm_Pedestal"])` creates a new scene collection and moves both existing objects into it. The tool accepts 1 to 200 distinct names. It checks every object before changing the scene, rejects an existing collection name, and preserves object links in other scenes. Enable mutations to use it. Save the `.blend` file in Blender to keep the change across sessions.
+
+### Object deletion
+
+`blender_delete_object(name="Cube")` deletes exactly one object datablock and unlinks it from every collection and scene in the open Blender file. It does not accept wildcards, delete collections, or purge the object's now-unused mesh or other data. The call requires mutations to be enabled and is blocked during a turntable capture. Back up the scene and confirm the exact object name before calling it. Save the `.blend` file only when you intend to persist the deletion.
 
 ## Architecture
 
@@ -118,7 +123,7 @@ CI installs the package, compiles the add-on source, and runs the unit tests. A 
 ## Current limitations
 
 - Blender must remain open with the custom add-on enabled.
-- Saving, deleting, final camera rendering, materials, modifiers, undo checkpoints, and file export are intentionally deferred.
+- Saving, final camera rendering, materials, modifiers, undo checkpoints, orphan-data purging, and file export are intentionally deferred.
 - Deployment is currently documented as a manual procedure; install and verification shell scripts are not yet present.
 - The `.mcpb` bundle mentioned by Blender's official Lab project is not used by this remote OAuth/Cloudflare architecture.
 
