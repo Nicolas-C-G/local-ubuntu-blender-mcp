@@ -39,6 +39,7 @@ The current implementation:
 - requires positive scales;
 - allows only enumerated primitive types;
 - bounds custom-mesh topology and validates every coordinate and vertex index;
+- allows only enumerated modifier types and per-type parameter names, values, and ranges;
 - permits deletion of only one exact-name object per call, with no wildcard or bulk mode;
 - queues Blender API work onto the main thread.
 
@@ -55,6 +56,19 @@ and non-degenerate edge and face definitions. The bridge creates the mesh only
 through Blender's `from_pydata` API and removes partially created datablocks if
 creation fails. The operation remains subject to the mutation gate, audit trail,
 request-size limit, duplicate-name check, and turntable mutation lock.
+
+### Modifier policy
+
+`blender_add_modifier` does not expose Blender's unrestricted modifier property
+surface. The controller and bridge independently enforce an explicit modifier
+type allowlist and a separate parameter allowlist for every supported type.
+Values are type-checked and bounded before Blender is changed. Object references
+for Boolean and Mirror modifiers are resolved by exact name inside the current
+scene; self-references are rejected, and Boolean operands must be meshes. If
+Blender rejects a property assignment, the newly created modifier is removed.
+The operation adds but never applies a modifier, does not save the file, remains
+behind the mutation gate and audit trail, and is blocked during turntable
+capture.
 
 ## Secret handling
 

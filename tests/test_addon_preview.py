@@ -59,6 +59,7 @@ class FakeObject:
         self.mode = "OBJECT"
         self.matrix_world = FakeMatrix(x)
         self.bound_box = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
+        self.modifiers = FakeModifiers()
 
     def hide_get(self, *, view_layer: object | None = None) -> bool:
         return False
@@ -77,6 +78,19 @@ class FakeObjects(dict[str, FakeObject]):
         if not do_unlink:
             raise AssertionError("delete_object must unlink the object")
         del self[obj.name]
+
+
+class FakeModifier:
+    def __init__(self, name: str, modifier_type: str) -> None:
+        self.name = name
+        self.type = modifier_type
+
+
+class FakeModifiers(list[FakeModifier]):
+    def new(self, *, name: str, type: str) -> FakeModifier:
+        modifier = FakeModifier(name, type)
+        self.append(modifier)
+        return modifier
 
 
 class FakeMesh:
@@ -222,7 +236,7 @@ class AddonPreviewTests(unittest.TestCase):
 
     def test_collection_mutations_are_blocked_during_preview(self) -> None:
         self.addon._active_preview = "a" * 32
-        for action in ("create_collection", "create_mesh", "delete_collection"):
+        for action in ("add_modifier", "create_collection", "create_mesh", "delete_collection"):
             with self.subTest(action=action), self.assertRaisesRegex(ValueError, "unavailable"):
                 self.addon._execute({"action": action, "arguments": {}})
 
@@ -268,6 +282,74 @@ class AddonPreviewTests(unittest.TestCase):
                     "faces": [[0, 1, 3]],
                 },
             })
+
+    def test_add_modifier_adds_allowlisted_modifier_and_parameters(self) -> None:
+        result = self.addon._execute({
+            "action": "add_modifier",
+            "arguments": {
+                "object_name": "Pedestal",
+                "modifier_type": "BEVEL",
+                "parameters": {"width": 0.25, "segments": 3, "limit_method": "ANGLE"},
+            },
+        })
+        self.assertEqual(result, {
+            "added": True,
+            "object_name": "Pedestal",
+            "modifier": {
+                "name": "Bevel",
+                "type": "BEVEL",
+                "parameters": {"width": 0.25, "segments": 3, "limit_method": "ANGLE"},
+            },
+        })
+        modifier = self.pedestal.modifiers[0]
+        self.assertEqual(modifier.width, 0.25)
+        self.assertEqual(modifier.segments, 3)
+        self.assertEqual(modifier.limit_method, "ANGLE")
+
+    def test_add_boolean_modifier_resolves_operand_object(self) -> None:
+        result = self.addon._execute({
+            "action": "add_modifier",
+            "arguments": {
+                "object_name": "Pedestal",
+                "modifier_type": "BOOLEAN",
+                "parameters": {"object": "Grip", "operation": "DIFFERENCE"},
+            },
+        })
+        self.assertEqual(result["modifier"]["parameters"]["object"], "Grip")
+        self.assertIs(self.pedestal.modifiers[0].object, self.grip)
+
+    def test_add_modifier_rejects_invalid_targets_and_parameters(self) -> None:
+        invalid_commands = (
+            {
+                "object_name": "Missing",
+                "modifier_type": "BEVEL",
+                "parameters": {},
+            },
+            {
+                "object_name": "Light",
+                "modifier_type": "BEVEL",
+                "parameters": {},
+            },
+            {
+                "object_name": "Pedestal",
+                "modifier_type": "BOOLEAN",
+                "parameters": {},
+            },
+            {
+                "object_name": "Pedestal",
+                "modifier_type": "BOOLEAN",
+                "parameters": {"object": "Pedestal"},
+            },
+            {
+                "object_name": "Pedestal",
+                "modifier_type": "BEVEL",
+                "parameters": {"segments": 100},
+            },
+        )
+        for arguments in invalid_commands:
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                self.addon._execute({"action": "add_modifier", "arguments": arguments})
+        self.assertEqual(self.pedestal.modifiers, [])
 
     def test_delete_collection_preserves_objects_and_child_collections(self) -> None:
         result = self.addon._execute({

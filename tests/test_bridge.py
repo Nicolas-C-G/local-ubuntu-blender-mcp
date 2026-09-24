@@ -80,6 +80,14 @@ class BlenderBridgeClientTests(unittest.TestCase):
         })
         self.assertEqual(result["received"], "create_mesh")
 
+    def test_add_modifier_action_is_allowlisted(self) -> None:
+        result = self.client.call("add_modifier", {
+            "object_name": "Wing",
+            "modifier_type": "BEVEL",
+            "parameters": {"width": 0.1},
+        })
+        self.assertEqual(result["received"], "add_modifier")
+
     def test_delete_object_action_is_allowlisted(self) -> None:
         result = self.client.call("delete_object", {"name": "Cube"})
         self.assertEqual(result["received"], "delete_object")

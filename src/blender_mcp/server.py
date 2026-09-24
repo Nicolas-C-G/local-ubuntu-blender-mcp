@@ -142,6 +142,21 @@ def blender_create_mesh(
 
 
 @mcp.tool()
+def blender_add_modifier(
+    object_name: str,
+    modifier_type: str,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Add one allowlisted modifier to an existing mesh object.
+
+    Supported modifier types are ARRAY, BEVEL, BOOLEAN, DECIMATE, MIRROR,
+    SCREW, SIMPLE_DEFORM, SOLIDIFY, SUBSURF, and TRIANGULATE. Each type accepts
+    only its documented, bounded parameter allowlist. Requires mutations enabled.
+    """
+    return controller.add_modifier(object_name, modifier_type, parameters)
+
+
+@mcp.tool()
 def blender_set_transform(
     name: str,
     location: list[float],

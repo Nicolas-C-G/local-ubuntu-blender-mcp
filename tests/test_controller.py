@@ -115,6 +115,56 @@ class BlenderControllerTests(unittest.TestCase):
                     self.controller.create_mesh(vertices, edges, faces)
         self.assertEqual(self.bridge.calls, [])
 
+    def test_add_modifier_requires_mutation_gate(self) -> None:
+        with self.assertRaisesRegex(ControlError, "disabled"):
+            self.controller.add_modifier("Cube", "BEVEL", {"width": 0.1})
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_add_modifier_validates_normalizes_and_forwards_parameters(self) -> None:
+        self.controller.mutations_enabled = True
+        result = self.controller.add_modifier(
+            " Wing ",
+            " bevel ",
+            {"width": 0.2, "segments": 3, "limit_method": "angle"},
+        )
+        self.assertEqual(result["action"], "add_modifier")
+        self.assertEqual(result["arguments"], {
+            "object_name": "Wing",
+            "modifier_type": "BEVEL",
+            "parameters": {"width": 0.2, "segments": 3, "limit_method": "ANGLE"},
+        })
+
+    def test_add_modifier_validates_pointer_and_sequence_parameters(self) -> None:
+        self.controller.mutations_enabled = True
+        result = self.controller.add_modifier(
+            "Body",
+            "boolean",
+            {"object": " Cutter ", "operation": "difference"},
+        )
+        self.assertEqual(result["arguments"]["parameters"], {
+            "object": "Cutter", "operation": "DIFFERENCE"
+        })
+        mirror = self.controller.add_modifier(
+            "Body", "mirror", {"use_axis": [True, False, False]}
+        )
+        self.assertEqual(mirror["arguments"]["parameters"]["use_axis"], [True, False, False])
+
+    def test_add_modifier_rejects_unsupported_or_unbounded_parameters(self) -> None:
+        self.controller.mutations_enabled = True
+        invalid_calls = (
+            ("NOISE", {}),
+            ("BEVEL", {"segments": 65}),
+            ("BEVEL", {"unexpected": 1}),
+            ("BOOLEAN", {}),
+            ("MIRROR", {"use_axis": [False, False, False]}),
+            ("ARRAY", {"relative_offset_displace": [0, 0, math.inf]}),
+        )
+        for modifier_type, parameters in invalid_calls:
+            with self.subTest(modifier_type=modifier_type, parameters=parameters):
+                with self.assertRaises(ControlError):
+                    self.controller.add_modifier("Body", modifier_type, parameters)
+        self.assertEqual(self.bridge.calls, [])
+
     def test_non_finite_transform_is_rejected(self) -> None:
         self.controller.mutations_enabled = True
         with self.assertRaisesRegex(ControlError, "finite"):
