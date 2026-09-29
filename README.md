@@ -21,6 +21,8 @@ This is an independent, security-focused implementation inspired by the Local Ub
 | `blender_create_primitive` | Disabled | Create an allowlisted mesh primitive |
 | `blender_create_mesh` | Disabled | Create bounded custom topology from vertices, edges, and faces |
 | `blender_add_modifier` | Disabled | Add one allowlisted modifier to an existing mesh object |
+| `blender_create_material` | Disabled | Create an opaque Principled BSDF material |
+| `blender_assign_material` | Disabled | Apply an existing material to a scene mesh |
 | `blender_create_collection` | Disabled | Create a collection and move existing scene objects into it |
 | `blender_delete_collection` | Disabled | Delete one exact-name collection while preserving its contents |
 | `blender_set_transform` | Disabled | Replace one object's location, rotation, and scale |
@@ -109,6 +111,33 @@ bounded. `BOOLEAN.object` and `MIRROR.mirror_object` take exact object names and
 must resolve inside the current scene; self-references are rejected. The tool
 does not apply the modifier or save the file. It requires mutations to be
 enabled and is blocked during turntable capture.
+
+### Materials
+
+Create a material, then assign it to a mesh in the current scene:
+
+```python
+blender_create_material(
+    name="Bee Yellow",
+    base_color=[1.0, 0.65, 0.0],
+    metallic=0.0,
+    roughness=0.45,
+)
+blender_assign_material(object_name="Bee_Body", material_name="Bee Yellow")
+```
+
+`base_color` is exactly three RGB components from 0 to 1; `metallic` and
+`roughness` are also in that range. The color is opaque. Creation rejects an
+existing material name, including Blender names longer than 63 UTF-8 bytes.
+Assignment uses the named existing material on every slot of a mesh object in
+the current scene. If the mesh has no slots, one is added. Existing slots are
+linked at the object level so other objects sharing the mesh retain their
+appearance; when a slot must be added to shared mesh data, the mesh is copied
+first. Use Material Preview or Rendered viewport shading to see the Principled
+BSDF appearance. The turntable captures the viewport's chosen shading mode.
+Both operations require mutations enabled, are blocked during turntable
+capture, and do not save the `.blend` file. Image and procedural textures are
+outside this feature.
 
 ### Collections
 

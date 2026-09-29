@@ -21,6 +21,8 @@ ALLOWED_ACTIONS = frozenset(
         "create_primitive",
         "create_mesh",
         "add_modifier",
+        "create_material",
+        "assign_material",
         "set_transform",
         "start_turntable",
         "turntable_status",

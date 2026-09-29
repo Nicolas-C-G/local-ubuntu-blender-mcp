@@ -165,6 +165,45 @@ class BlenderControllerTests(unittest.TestCase):
                     self.controller.add_modifier("Body", modifier_type, parameters)
         self.assertEqual(self.bridge.calls, [])
 
+    def test_material_mutations_require_gate(self) -> None:
+        with self.assertRaisesRegex(ControlError, "disabled"):
+            self.controller.create_material("Red", [1, 0, 0], 0, 0.5)
+        with self.assertRaisesRegex(ControlError, "disabled"):
+            self.controller.assign_material("Cube", "Red")
+        self.assertEqual(self.bridge.calls, [])
+
+    def test_create_and_assign_material_forward_normalized_arguments(self) -> None:
+        self.controller.mutations_enabled = True
+        created = self.controller.create_material(" Red ", [1, 0.25, 0], 0, 0.5)
+        self.assertEqual(created["arguments"], {
+            "name": "Red", "base_color": [1.0, 0.25, 0.0],
+            "metallic": 0.0, "roughness": 0.5,
+        })
+        assigned = self.controller.assign_material(" Cube ", " Red ")
+        self.assertEqual(assigned["arguments"], {
+            "object_name": "Cube", "material_name": "Red",
+        })
+
+    def test_create_material_rejects_invalid_values_before_bridge(self) -> None:
+        self.controller.mutations_enabled = True
+        for color, metallic, roughness in (
+            ([1, 0], 0, 0.5),
+            ([1, True, 0], 0, 0.5),
+            ([math.nan, 0, 0], 0, 0.5),
+            ([1.01, 0, 0], 0, 0.5),
+            ([0, 0, 0], True, 0.5),
+            ([0, 0, 0], 0, math.inf),
+            ([0, 0, 0], 0, -0.1),
+        ):
+            with self.subTest(color=color, metallic=metallic, roughness=roughness):
+                with self.assertRaises(ControlError):
+                    self.controller.create_material("Test", color, metallic, roughness)
+        with self.assertRaises(ControlError):
+            self.controller.assign_material("\n", "Red")
+        with self.assertRaisesRegex(ControlError, "63 UTF-8"):
+            self.controller.create_material("é" * 32, [1, 0, 0], 0, 0.5)
+        self.assertEqual(self.bridge.calls, [])
+
     def test_non_finite_transform_is_rejected(self) -> None:
         self.controller.mutations_enabled = True
         with self.assertRaisesRegex(ControlError, "finite"):

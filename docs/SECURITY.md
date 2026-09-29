@@ -70,6 +70,20 @@ The operation adds but never applies a modifier, does not save the file, remains
 behind the mutation gate and audit trail, and is blocked during turntable
 capture.
 
+### Material policy
+
+`blender_create_material` accepts a unique name (at most 63 UTF-8 bytes),
+three finite RGB components in `0..1`, and finite `metallic` and `roughness`
+values in `0..1`. It creates only a Principled BSDF material with opaque base
+color; it cannot load images, accept shader code, or create arbitrary nodes.
+If Blender cannot configure the material, the new datablock is removed.
+`blender_assign_material` resolves one exact-name mesh in the current scene
+and one existing material. It assigns that material to every slot of the object,
+using object-linked slots to protect other users of shared mesh data. A linked
+mesh without slots is copied before adding the first slot. Both calls remain
+behind the mutation gate and audit trail and are blocked during turntable
+capture. Neither call saves the `.blend` file.
+
 ## Secret handling
 
 Never commit or share:

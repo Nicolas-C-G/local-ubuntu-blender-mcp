@@ -88,6 +88,17 @@ class BlenderBridgeClientTests(unittest.TestCase):
         })
         self.assertEqual(result["received"], "add_modifier")
 
+    def test_material_actions_are_allowlisted(self) -> None:
+        created = self.client.call("create_material", {
+            "name": "Yellow", "base_color": [1, 0.8, 0],
+            "metallic": 0, "roughness": 0.5,
+        })
+        assigned = self.client.call("assign_material", {
+            "object_name": "Bee", "material_name": "Yellow",
+        })
+        self.assertEqual(created["received"], "create_material")
+        self.assertEqual(assigned["received"], "assign_material")
+
     def test_delete_object_action_is_allowlisted(self) -> None:
         result = self.client.call("delete_object", {"name": "Cube"})
         self.assertEqual(result["received"], "delete_object")

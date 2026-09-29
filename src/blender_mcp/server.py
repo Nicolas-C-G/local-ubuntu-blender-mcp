@@ -157,6 +157,31 @@ def blender_add_modifier(
 
 
 @mcp.tool()
+def blender_create_material(
+    name: str,
+    base_color: list[float],
+    metallic: float,
+    roughness: float,
+) -> dict[str, Any]:
+    """Create a new opaque Principled BSDF material.
+
+    base_color is RGB with three numbers between 0 and 1. metallic and
+    roughness are numbers between 0 and 1. Names must be unique. Requires
+    mutations enabled; does not assign the material to an object.
+    """
+    return controller.create_material(name, base_color, metallic, roughness)
+
+
+@mcp.tool()
+def blender_assign_material(object_name: str, material_name: str) -> dict[str, Any]:
+    """Assign an existing material to all slots of a mesh in the current scene.
+
+    If the mesh has no slots, create its first slot. Requires mutations enabled.
+    """
+    return controller.assign_material(object_name, material_name)
+
+
+@mcp.tool()
 def blender_set_transform(
     name: str,
     location: list[float],
