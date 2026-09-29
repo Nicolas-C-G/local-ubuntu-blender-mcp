@@ -68,6 +68,10 @@ Perform only after the critical and read-only sections pass. Use a disposable `.
 - [ ] Confirm an unsupported modifier type and unknown parameter are rejected.
 - [ ] Add a Boolean modifier between two disposable meshes and verify the operand reference.
 - [ ] Confirm a missing or self-referencing Boolean operand is rejected without adding a modifier.
+- [ ] Create an opaque material with bounded RGB, metallic, and roughness values.
+- [ ] Assign it to a disposable scene mesh and verify its color in Material Preview.
+- [ ] Confirm an existing material name, missing mesh or material, and out-of-range color are rejected.
+- [ ] Confirm material changes are blocked during a turntable capture.
 - [ ] Confirm the object appears in Blender and the returned result matches it.
 - [ ] Apply a bounded transform and verify it visually.
 - [ ] Unsupported primitive type is rejected.

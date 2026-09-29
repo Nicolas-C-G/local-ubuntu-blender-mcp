@@ -488,6 +488,54 @@ class BlenderController:
             },
         )
 
+    def create_material(
+        self,
+        name: str,
+        base_color: list[float],
+        metallic: float,
+        roughness: float,
+    ) -> dict[str, Any]:
+        """Create a Principled BSDF material with an opaque RGB base color."""
+        self._require_mutations()
+        normalized_name = self._name(name)
+        if len(normalized_name.encode("utf-8")) > 63:
+            raise ControlError("Material name must be at most 63 UTF-8 bytes.")
+        if (
+            not isinstance(base_color, list)
+            or len(base_color) != 3
+            or any(type(component) not in {int, float} for component in base_color)
+        ):
+            raise ControlError("base_color must contain exactly three RGB numbers.")
+        color = [float(component) for component in base_color]
+        if any(not math.isfinite(component) or not 0 <= component <= 1 for component in color):
+            raise ControlError("base_color components must be between 0 and 1.")
+
+        def unit(value: float, field: str) -> float:
+            if type(value) not in {int, float}:
+                raise ControlError(f"{field} must be a number between 0 and 1.")
+            number = float(value)
+            if not math.isfinite(number) or not 0 <= number <= 1:
+                raise ControlError(f"{field} must be a number between 0 and 1.")
+            return number
+
+        return self._call(
+            "create_material",
+            {
+                "name": normalized_name,
+                "base_color": color,
+                "metallic": unit(metallic, "metallic"),
+                "roughness": unit(roughness, "roughness"),
+            },
+        )
+
+    def assign_material(self, object_name: str, material_name: str) -> dict[str, Any]:
+        """Assign an existing material to every material slot on one scene mesh."""
+        self._require_mutations()
+        return self._call(
+            "assign_material",
+            {"object_name": self._name(object_name), "material_name": self._name(material_name)},
+        )
+
     def set_transform(
         self,
         name: str,

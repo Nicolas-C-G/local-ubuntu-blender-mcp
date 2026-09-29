@@ -51,7 +51,8 @@ class FakeObject:
     ) -> None:
         self.name = name
         self.type = object_type
-        self.data = data
+        self.data = data if data is not None else (FakeMesh(name + "Mesh") if object_type == "MESH" else None)
+        self._material_slots: list[FakeMaterialSlot] = []
         self.location = [0.0, 0.0, 0.0]
         self.rotation_euler = [0.0, 0.0, 0.0]
         self.rotation_mode = "XYZ"
@@ -60,6 +61,14 @@ class FakeObject:
         self.matrix_world = FakeMatrix(x)
         self.bound_box = [(a, b, c) for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
         self.modifiers = FakeModifiers()
+
+    @property
+    def material_slots(self) -> list[FakeMaterialSlot]:
+        if self.data is not None:
+            while len(self._material_slots) < len(self.data.materials):
+                material = self.data.materials[len(self._material_slots)]
+                self._material_slots.append(FakeMaterialSlot(material))
+        return self._material_slots
 
     def hide_get(self, *, view_layer: object | None = None) -> bool:
         return False
@@ -96,6 +105,8 @@ class FakeModifiers(list[FakeModifier]):
 class FakeMesh:
     def __init__(self, name: str) -> None:
         self.name = name
+        self.users = 1
+        self.materials: list[FakeMaterial] = []
         self.vertices: list[list[float]] = []
         self.edges: list[list[int]] = []
         self.faces: list[list[int]] = []
@@ -114,6 +125,45 @@ class FakeMesh:
     def update(self) -> None:
         self.updated = True
 
+    def copy(self) -> FakeMesh:
+        copied = FakeMesh(self.name + "Copy")
+        copied.materials = list(self.materials)
+        return copied
+
+
+class FakeMaterialSlot:
+    def __init__(self, material: FakeMaterial) -> None:
+        self.link = "DATA"
+        self.material = material
+
+
+class FakeSocket:
+    def __init__(self) -> None:
+        self.default_value: object = None
+
+
+class FakeMaterial:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.use_nodes = False
+        node = types.SimpleNamespace(
+            type="BSDF_PRINCIPLED",
+            inputs={key: FakeSocket() for key in ("Base Color", "Metallic", "Roughness")},
+        )
+        self.node_tree = types.SimpleNamespace(nodes=[node])
+
+
+class FakeMaterials(dict[str, FakeMaterial]):
+    def new(self, name: str) -> FakeMaterial:
+        material = FakeMaterial(name)
+        self[name] = material
+        return material
+
+    def remove(self, material: FakeMaterial, *, do_unlink: bool = False) -> None:
+        if not do_unlink:
+            raise AssertionError("material removal must unlink")
+        del self[material.name]
+
 
 class FakeMeshes(dict[str, FakeMesh]):
     def new(self, name: str) -> FakeMesh:
@@ -122,7 +172,7 @@ class FakeMeshes(dict[str, FakeMesh]):
         return mesh
 
     def remove(self, mesh: FakeMesh) -> None:
-        del self[mesh.name]
+        self.pop(mesh.name, None)
 
 
 class FakeCollections(dict[str, FakeCollection]):
@@ -185,10 +235,12 @@ class AddonPreviewTests(unittest.TestCase):
         })
         self.data_collections = FakeCollections({"RobotArm": self.assembly})
         self.data_meshes = FakeMeshes()
+        self.data_materials = FakeMaterials()
         bpy.data = types.SimpleNamespace(
             collections=self.data_collections,
             objects=self.data_objects,
             meshes=self.data_meshes,
+            materials=self.data_materials,
             scenes=[self.scene],
         )
         mathutils = types.ModuleType("mathutils")
@@ -236,7 +288,10 @@ class AddonPreviewTests(unittest.TestCase):
 
     def test_collection_mutations_are_blocked_during_preview(self) -> None:
         self.addon._active_preview = "a" * 32
-        for action in ("add_modifier", "create_collection", "create_mesh", "delete_collection"):
+        for action in (
+            "add_modifier", "create_collection", "create_mesh", "delete_collection",
+            "create_material", "assign_material",
+        ):
             with self.subTest(action=action), self.assertRaisesRegex(ValueError, "unavailable"):
                 self.addon._execute({"action": action, "arguments": {}})
 
@@ -350,6 +405,88 @@ class AddonPreviewTests(unittest.TestCase):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 self.addon._execute({"action": "add_modifier", "arguments": arguments})
         self.assertEqual(self.pedestal.modifiers, [])
+
+    def test_create_material_sets_principled_and_viewport_values(self) -> None:
+        result = self.addon._execute({
+            "action": "create_material",
+            "arguments": {
+                "name": "Bee Yellow", "base_color": [1, 0.6, 0],
+                "metallic": 0, "roughness": 0.4,
+            },
+        })
+        self.assertEqual(result, {
+            "created": True,
+            "material": {
+                "name": "Bee Yellow", "base_color": [1.0, 0.6, 0.0],
+                "metallic": 0.0, "roughness": 0.4,
+            },
+        })
+        material = self.data_materials["Bee Yellow"]
+        self.assertTrue(material.use_nodes)
+        self.assertEqual(material.diffuse_color, (1.0, 0.6, 0.0, 1.0))
+        self.assertEqual(
+            material.node_tree.nodes[0].inputs["Base Color"].default_value,
+            (1.0, 0.6, 0.0, 1.0),
+        )
+
+    def test_create_material_rejects_duplicates_and_invalid_factors(self) -> None:
+        arguments = {
+            "name": "Bee Yellow", "base_color": [1, 0.6, 0],
+            "metallic": 0, "roughness": 0.4,
+        }
+        self.addon._execute({"action": "create_material", "arguments": arguments})
+        for invalid in (
+            arguments,
+            {**arguments, "name": "TooLong" * 10},
+            {**arguments, "name": "Blue", "base_color": [1, True, 0]},
+            {**arguments, "name": "Blue", "base_color": [1, math.nan, 0]},
+            {**arguments, "name": "Blue", "metallic": 1.1},
+            {**arguments, "name": "Blue", "roughness": True},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.addon._execute({"action": "create_material", "arguments": invalid})
+        self.assertEqual(list(self.data_materials), ["Bee Yellow"])
+
+    def test_assign_material_covers_all_slots_without_mutating_shared_data(self) -> None:
+        yellow = self.data_materials.new("Yellow")
+        old = self.data_materials.new("Old")
+        self.pedestal.data.materials.extend([old, old])
+        self.pedestal.data.users = 2
+        result = self.addon._execute({
+            "action": "assign_material",
+            "arguments": {"object_name": "Pedestal", "material_name": "Yellow"},
+        })
+        self.assertEqual(result["slot_count"], 2)
+        self.assertEqual(self.pedestal.data.materials, [old, old])
+        self.assertTrue(all(slot.link == "OBJECT" for slot in self.pedestal.material_slots))
+        self.assertTrue(all(slot.material is yellow for slot in self.pedestal.material_slots))
+
+    def test_assign_material_copies_shared_mesh_when_no_slots(self) -> None:
+        yellow = self.data_materials.new("Yellow")
+        old_mesh = self.pedestal.data
+        old_mesh.users = 2
+        result = self.addon._execute({
+            "action": "assign_material",
+            "arguments": {"object_name": "Pedestal", "material_name": "Yellow"},
+        })
+        self.assertEqual(result["slot_count"], 1)
+        self.assertIsNot(self.pedestal.data, old_mesh)
+        self.assertEqual(old_mesh.materials, [])
+        self.assertIs(self.pedestal.data.materials[0], yellow)
+
+    def test_assign_material_rejects_missing_or_non_mesh_targets(self) -> None:
+        self.data_materials.new("Yellow")
+        for object_name, material_name in (
+            ("Missing", "Yellow"), ("Light", "Yellow"), ("Pedestal", "Missing"),
+        ):
+            with self.subTest(object_name=object_name, material_name=material_name):
+                with self.assertRaises(ValueError):
+                    self.addon._execute({
+                        "action": "assign_material",
+                        "arguments": {
+                            "object_name": object_name, "material_name": material_name,
+                        },
+                    })
 
     def test_delete_collection_preserves_objects_and_child_collections(self) -> None:
         result = self.addon._execute({

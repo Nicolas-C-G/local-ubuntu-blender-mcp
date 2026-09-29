@@ -164,6 +164,30 @@ def _name(arguments: dict[str, Any], key: str = "name") -> str:
     return value
 
 
+def _material_color(arguments: dict[str, Any]) -> list[float]:
+    value = arguments.get("base_color")
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or any(type(component) not in {int, float} for component in value)
+    ):
+        raise ValueError("base_color must contain exactly three RGB numbers")
+    color = [float(component) for component in value]
+    if any(not math.isfinite(component) or not 0 <= component <= 1 for component in color):
+        raise ValueError("base_color components must be between 0 and 1")
+    return color
+
+
+def _material_factor(arguments: dict[str, Any], key: str) -> float:
+    value = arguments.get(key)
+    if type(value) not in {int, float}:
+        raise ValueError(f"{key} must be a number between 0 and 1")
+    number = float(value)
+    if not math.isfinite(number) or not 0 <= number <= 1:
+        raise ValueError(f"{key} must be a number between 0 and 1")
+    return number
+
+
 def _modifier_parameters(
     modifier_type: str,
     parameters: dict[str, Any] | None,
@@ -434,6 +458,8 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
         "create_primitive",
         "create_mesh",
         "add_modifier",
+        "create_material",
+        "assign_material",
         "set_transform",
         "create_collection",
         "delete_object",
@@ -591,6 +617,98 @@ def _execute(command: dict[str, Any]) -> dict[str, Any]:
                 "type": modifier.type,
                 "parameters": parameters,
             },
+        }
+
+    if action == "create_material":
+        name = _name(arguments)
+        if len(name.encode("utf-8")) > 63:
+            raise ValueError("Material name must be at most 63 UTF-8 bytes")
+        if bpy.data.materials.get(name) is not None:
+            raise ValueError("A material with that name already exists")
+        color = _material_color(arguments)
+        metallic = _material_factor(arguments, "metallic")
+        roughness = _material_factor(arguments, "roughness")
+
+        material = bpy.data.materials.new(name)
+        try:
+            if material.name != name:
+                raise ValueError("Blender could not preserve the material name")
+            material.use_nodes = True
+            principled = next(
+                (node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED"),
+                None,
+            )
+            if principled is None:
+                raise RuntimeError("Blender did not create a Principled BSDF node")
+            principled.inputs["Base Color"].default_value = (*color, 1.0)
+            principled.inputs["Metallic"].default_value = metallic
+            principled.inputs["Roughness"].default_value = roughness
+            material.diffuse_color = (*color, 1.0)
+            material.metallic = metallic
+            material.roughness = roughness
+        except Exception:
+            bpy.data.materials.remove(material, do_unlink=True)
+            raise
+        return {
+            "created": True,
+            "material": {
+                "name": material.name,
+                "base_color": color,
+                "metallic": metallic,
+                "roughness": roughness,
+            },
+        }
+
+    if action == "assign_material":
+        object_name = _name(arguments, "object_name")
+        material_name = _name(arguments, "material_name")
+        obj = bpy.context.scene.objects.get(object_name)
+        if obj is None:
+            raise ValueError("Object does not exist in the current scene")
+        if obj.type != "MESH":
+            raise ValueError("Materials can only be assigned to mesh objects")
+        material = bpy.data.materials.get(material_name)
+        if material is None:
+            raise ValueError("Material does not exist")
+
+        if not obj.material_slots:
+            # A material slot is stored on mesh data. Isolate linked duplicates
+            # before adding one so another object's appearance does not change.
+            previous_data = obj.data
+            copied_data = None
+            try:
+                if previous_data.users > 1:
+                    copied_data = previous_data.copy()
+                    obj.data = copied_data
+                obj.data.materials.append(material)
+                bpy.context.view_layer.update()
+            except Exception:
+                if copied_data is not None:
+                    obj.data = previous_data
+                    bpy.data.meshes.remove(copied_data)
+                elif obj.data.materials and obj.data.materials[-1] is material:
+                    obj.data.materials.pop(index=len(obj.data.materials) - 1)
+                raise
+        else:
+            # Object-linked slots avoid changing the material of other objects
+            # that share this mesh. Replace every slot so all faces use it.
+            slots = tuple(obj.material_slots)
+            previous = [(slot.link, slot.material) for slot in slots]
+            try:
+                for slot in slots:
+                    slot.link = "OBJECT"
+                    slot.material = material
+                bpy.context.view_layer.update()
+            except Exception:
+                for slot, (link, old_material) in zip(slots, previous, strict=True):
+                    slot.link = link
+                    slot.material = old_material
+                raise
+        return {
+            "assigned": True,
+            "object_name": obj.name,
+            "material_name": material.name,
+            "slot_count": len(obj.material_slots),
         }
 
     if action == "set_transform":
